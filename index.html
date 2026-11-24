@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shelf Value - collection price tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Shelf Value</h1>
+    <p class="sub">Track what your collection is worth. Your data stays in this browser.</p>
+  </header>
+
+  <main>
+    <section class="stats" id="stats"></section>
+
+    <section class="card">
+      <h2>Collection value over time</h2>
+      <div id="totalChart" class="chart"></div>
+    </section>
+
+    <section class="card">
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search items...">
+        <select id="platformFilter"><option value="">All platforms</option></select>
+        <select id="sort">
+          <option value="value-desc">Value: high to low</option>
+          <option value="value-asc">Value: low to high</option>
+          <option value="name-asc">Name A to Z</option>
+          <option value="gain-desc">Gain: high to low</option>
+          <option value="updated-asc">Least recently priced</option>
+        </select>
+        <span class="spacer"></span>
+        <button id="addBtn" class="primary">+ Add item</button>
+        <div class="menu">
+          <button id="dataBtn">Data &#9662;</button>
+          <div class="menu-list" id="dataMenu" hidden>
+            <button data-act="export-json">Export backup (JSON)</button>
+            <button data-act="export-csv">Export CSV</button>
+            <button data-act="import">Import JSON / CSV...</button>
+            <button data-act="demo">Load demo data</button>
+            <button data-act="clear" class="danger">Delete all data</button>
+          </div>
+        </div>
+        <input id="fileInput" type="file" accept=".json,.csv" hidden>
+      </div>
+      <div class="table-wrap">
+        <table id="itemsTable">
+          <thead>
+            <tr>
+              <th>Item</th><th>Platform</th><th>Condition</th><th class="num">Qty</th>
+              <th class="num">Paid</th><th class="num">Value</th><th class="num">Last change</th>
+              <th class="num">Gain</th><th>Last priced</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="empty" class="empty" hidden>No items yet. Click <b>+ Add item</b>, or load demo data from the Data menu.</p>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="itemDialog">
+    <form id="itemForm" method="dialog">
+      <h2 id="itemDialogTitle">Add item</h2>
+      <label>Name <input name="name" required placeholder="e.g. Chrono Quest"></label>
+      <div class="row">
+        <label>Platform / set <input name="platform" list="platformList" placeholder="e.g. SNES"></label>
+        <label>Condition
+          <select name="condition">
+            <option>Loose</option><option>Complete (CIB)</option><option>New / Sealed</option>
+            <option>Graded</option><option>Box only</option><option>Manual only</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label>Quantity <input name="qty" type="number" min="1" step="1" value="1"></label>
+        <label>Paid (each) <input name="paid" type="number" min="0" step="0.01" placeholder="0.00"></label>
+        <label>Acquired <input name="acquired" type="date"></label>
+      </div>
+      <label id="startPriceLabel">Current price (optional) <input name="startPrice" type="number" min="0" step="0.01" placeholder="Adds a first price point today"></label>
+      <label>Notes <textarea name="notes" rows="2"></textarea></label>
+      <datalist id="platformList"></datalist>
+      <div class="actions">
+        <button type="button" data-close>Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detailDialog" class="wide">
+    <div class="detail-head">
+      <div>
+        <h2 id="dName"></h2>
+        <p id="dMeta" class="sub"></p>
+      </div>
+      <button data-close class="icon" aria-label="Close">&#10005;</button>
+    </div>
+    <div class="stats small" id="dStats"></div>
+    <div id="itemChart" class="chart"></div>
+    <div class="detail-actions">
+      <a id="ebayLink" target="_blank" rel="noopener">Check eBay sold listings &#8599;</a>
+      <span class="spacer"></span>
+      <button id="editBtn">Edit</button>
+      <button id="deleteBtn" class="danger">Delete</button>
+    </div>
+    <h3>Log a price</h3>
+    <form id="priceForm" class="row inline">
+      <label>Date <input name="date" type="date" required></label>
+      <label>Price <input name="price" type="number" min="0" step="0.01" required></label>
+      <label class="grow">Source / note <input name="source" placeholder="e.g. eBay sold, avg of 5"></label>
+      <button type="submit" class="primary">Add</button>
+    </form>
+    <h3>Price history</h3>
+    <table class="compact">
+      <thead><tr><th>Date</th><th class="num">Price</th><th>Source</th><th></th></tr></thead>
+      <tbody id="priceRows"></tbody>
+    </table>
+  </dialog>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
