@@ -391,7 +391,8 @@ const gradingCandidates = () => items.filter(it =>
 // =====================================================================
 // Main view
 // =====================================================================
-let view = 'collection';
+// A notification tap opens ?view=wishlist
+let view = ['collection', 'wishlist', 'sets', 'grading'].includes(new URLSearchParams(location.search).get('view')) ? new URLSearchParams(location.search).get('view') : 'collection';
 let rangeDays = 0;
 
 function statTile(label, value, extraClass = '') {
@@ -2120,12 +2121,103 @@ setInterval(() => { if (!document.hidden) syncNow(); }, 60e3);
 setInterval(() => { if (!syncBusy) updateSyncBadge(); }, 30e3);
 
 // =====================================================================
+// Wishlist price alerts (phone notifications sent by the worker's daily job)
+// =====================================================================
+const ALERT_SEEN_KEY = 'shelf-value-alert-seen';
+const isInstalled = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+// The offline script needs the sync code to fetch alert details when a notification arrives.
+async function storeSyncMeta() {
+  if (!('caches' in window)) return;
+  const c = await caches.open('shelf-meta');
+  if (syncCode()) await c.put('/__sync', new Response(JSON.stringify({ code: syncCode(), url: syncUrl() }), { headers: { 'Content-Type': 'application/json' } }));
+  else await c.delete('/__sync');
+}
+
+async function currentSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+
+async function renderAlertsSetting() {
+  const btn = $('#alertsBtn'), hint = $('#alertsHint');
+  hint.hidden = true;
+  if (!pushSupported() || (isIOS() && !isInstalled())) {
+    btn.disabled = true;
+    btn.textContent = 'Turn on price alerts';
+    hint.hidden = false;
+    hint.textContent = isIOS()
+      ? 'On iPhone, open Shelf Value from its Home Screen icon (not Safari) to turn on alerts. Needs iOS 16.4 or newer.'
+      : "This browser doesn't support notifications.";
+    return;
+  }
+  btn.disabled = false;
+  const sub = await currentSubscription();
+  btn.textContent = sub && Notification.permission === 'granted' ? 'Turn off price alerts on this device' : 'Turn on price alerts';
+  btn.classList.toggle('danger', !!sub);
+  if (Notification.permission === 'denied') {
+    hint.hidden = false;
+    hint.textContent = 'Notifications are blocked for Shelf Value. Allow them in your phone\'s Settings → Notifications, then try again.';
+  }
+}
+
+const b64ToBytes = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
+
+$('#alertsBtn').addEventListener('click', async () => {
+  const existing = await currentSubscription();
+  if (existing) {
+    await syncFetch('/sync/push', { method: 'DELETE', body: JSON.stringify({ endpoint: existing.endpoint }) }).catch(() => {});
+    await existing.unsubscribe().catch(() => {});
+    renderSyncSettings('Price alerts are off on this device.');
+    return renderAlertsSetting();
+  }
+  try {
+    const perm = await Notification.requestPermission(); // must be the first thing in the tap
+    if (perm !== 'granted') throw new Error('notifications were not allowed');
+    const info = await (await fetch(syncUrl() + '/')).json();
+    if (!info.vapidPublicKey) throw new Error('the price worker is not set up for alerts');
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(info.vapidPublicKey) });
+    const r = await syncFetch('/sync/push', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) });
+    if (r.status !== 200) throw new Error(r.body.error || `error ${r.status}`);
+    await storeSyncMeta();
+    renderSyncSettings('✓ Price alerts are on. Set a target price on wishlist cards to get alerts.');
+  } catch (err) {
+    renderSyncSettings("Couldn't turn on alerts: " + err.message, true);
+  }
+  renderAlertsSetting();
+});
+
+// Also show new alerts inside the app when it opens.
+async function checkAlertsInApp() {
+  if (!syncCode()) return;
+  try {
+    const r = await syncFetch('/sync/alerts');
+    const a = r.body;
+    const seen = +localStorage.getItem(ALERT_SEEN_KEY) || 0;
+    if (r.status === 200 && a.at > seen && a.list?.length) {
+      localStorage.setItem(ALERT_SEEN_KEY, String(a.at));
+      const first = a.list[0];
+      toast(a.list.length === 1
+        ? `🔔 ${first.name} is ${money(first.price)} — at or under your ${money(first.target)} target`
+        : `🔔 ${a.list.length} wishlist cards hit your target price`);
+    }
+  } catch { /* offline */ }
+}
+
+$('#settingsBtn').addEventListener('click', () => { renderAlertsSetting(); storeSyncMeta(); });
+
+// =====================================================================
 // Start
 // =====================================================================
 render();
 updateRefreshStatus();
 updateSyncBadge();
-syncNow();
+syncNow().then(checkAlertsInApp);
+storeSyncMeta();
 loadSets().then(() => {
   fillBrowseSets();
   if (view === 'sets') renderSetsView();

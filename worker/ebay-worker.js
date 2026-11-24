@@ -82,10 +82,33 @@ async function handleSync(req, env, url, cors) {
 
   const current = await env.SYNC.get(key, 'json');
   if (!current) return json({ error: 'No collection found for that sync code' }, 404, cors);
+  const hash = key.slice(4);
 
-  if (req.method === 'GET') return json(current, 200, cors);
+  // Phone notifications: save / remove this device's push subscription.
+  if (url.pathname === '/sync/push') {
+    const body = await req.json().catch(() => ({}));
+    let subs = (await env.SYNC.get('push:' + hash, 'json')) || [];
+    if (req.method === 'POST') {
+      const sub = body.subscription;
+      if (!sub || typeof sub.endpoint !== 'string' || !/^https:\/\//.test(sub.endpoint)) return json({ error: 'Bad subscription' }, 400, cors);
+      subs = subs.filter(s => s.endpoint !== sub.endpoint).concat([{ endpoint: sub.endpoint, added: Date.now() }]).slice(-6);
+      await env.SYNC.put('push:' + hash, JSON.stringify(subs));
+      return json({ ok: true, devices: subs.length }, 200, cors);
+    }
+    if (req.method === 'DELETE') {
+      subs = subs.filter(s => s.endpoint !== body.endpoint);
+      await env.SYNC.put('push:' + hash, JSON.stringify(subs));
+      return json({ ok: true, devices: subs.length }, 200, cors);
+    }
+  }
+  // The latest price alerts (the notification itself carries no data; the phone fetches this).
+  if (url.pathname === '/sync/alerts' && req.method === 'GET') {
+    return json((await env.SYNC.get('alerts:' + hash, 'json')) || { at: 0, list: [] }, 200, cors);
+  }
 
-  if (req.method === 'PUT') {
+  if (url.pathname === '/sync' && req.method === 'GET') return json(current, 200, cors);
+
+  if (url.pathname === '/sync' && req.method === 'PUT') {
     const text = await req.text();
     if (text.length > MAX_SYNC_BYTES) return json({ error: 'Collection is too large to sync' }, 413, cors);
     let body;
@@ -98,6 +121,137 @@ async function handleSync(req, env, url, cors) {
   return json({ error: 'Not found' }, 404, cors);
 }
 
+// ---------------------------------------------------------------------------
+// Daily prices + wishlist alerts (runs on a schedule, every 30 minutes)
+//
+// Each day it collects every raw card in every synced collection, looks up
+// today's TCGplayer price in small batches (free-plan limits), then adds the
+// day's price to each card's history and checks wishlist targets. If a wishlist
+// card is at or below its target, it saves an alert and pings the person's
+// phones (Web Push, VAPID; no payload — the phone fetches /sync/alerts).
+// ---------------------------------------------------------------------------
+const BATCH = 20;
+
+async function listAll(env, prefix) {
+  const keys = [];
+  let cursor;
+  do {
+    const page = await env.SYNC.list({ prefix, cursor });
+    page.keys.forEach(k => keys.push(k.name));
+    cursor = page.list_complete ? null : page.cursor;
+  } while (cursor);
+  return keys;
+}
+
+// Same version keys the app uses: "normal", "holofoil", ... and "<variantId>~<key>" for special printings.
+function priceMap(card) {
+  const out = {};
+  const add = (prefix, tp) => Object.entries(tp || {}).forEach(([k, v]) => {
+    if (v && typeof v === 'object' && (v.marketPrice != null || v.midPrice != null)) out[prefix + k] = v.marketPrice ?? v.midPrice;
+  });
+  add('', card.pricing?.tcgplayer);
+  (card.variants_detailed || []).forEach(v => add(`${v.variantId}~`, v.pricing?.tcgplayer));
+  return out;
+}
+
+const isRawCard = it => it && it.kind === 'card' && it.cardId && it.condition !== 'Graded';
+
+async function runDaily(env, { reset = false } = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  let st = reset ? null : await env.SYNC.get('cron:state', 'json');
+  if (!st || st.date !== today) {
+    const ids = new Set();
+    for (const k of await listAll(env, 'col:')) {
+      const c = await env.SYNC.get(k, 'json');
+      (c?.data?.items || []).forEach(it => { if (isRawCard(it)) ids.add(it.cardId); });
+    }
+    st = { date: today, queue: [...ids], total: ids.size, prices: {}, applied: false };
+  }
+  const batch = st.queue.splice(0, BATCH);
+  await Promise.all(batch.map(async id => {
+    try {
+      const r = await fetch(`https://api.tcgdex.net/v2/en/cards/${encodeURIComponent(id)}`);
+      if (r.ok) st.prices[id] = priceMap(await r.json());
+    } catch { /* try again tomorrow */ }
+  }));
+  let result = { date: st.date, remaining: st.queue.length, priced: Object.keys(st.prices).length, total: st.total };
+  if (!st.queue.length && !st.applied) {
+    result.applied = await applyPrices(env, st);
+    st.applied = true;
+  }
+  await env.SYNC.put('cron:state', JSON.stringify(st));
+  return result;
+}
+
+async function applyPrices(env, st) {
+  const now = Date.now();
+  const summary = [];
+  for (const k of await listAll(env, 'col:')) {
+    const c = await env.SYNC.get(k, 'json');
+    if (!c?.data?.items) continue;
+    let changed = false;
+    const alerts = [];
+    c.data.items.forEach(it => {
+      if (!isRawCard(it)) return;
+      const price = st.prices[it.cardId]?.[it.variant];
+      if (price == null) return;
+      it.prices = it.prices || [];
+      const existing = it.prices.find(p => p.date === st.date && p.source === 'TCGplayer market');
+      if (!existing) { it.prices.push({ id: crypto.randomUUID().slice(0, 12), date: st.date, price, source: 'TCGplayer market' }); it.updatedAt = now; changed = true; }
+      else if (existing.price !== price) { existing.price = price; it.updatedAt = now; changed = true; }
+      if (it.list === 'wishlist' && it.target != null && price <= it.target) {
+        const last = it.alert;
+        if (!last || now - last.at > 7 * 864e5 || price < last.price - 0.009) {
+          alerts.push({ name: it.name, set: it.setName || '', number: it.number || '', price, target: it.target });
+          it.alert = { at: now, price };
+          it.updatedAt = now; changed = true;
+        }
+      }
+    });
+    if (changed) await env.SYNC.put(k, JSON.stringify({ rev: c.rev + 1, updated: new Date().toISOString(), data: c.data }));
+    let pushed = 0;
+    if (alerts.length) {
+      const hash = k.slice(4);
+      await env.SYNC.put('alerts:' + hash, JSON.stringify({ at: now, list: alerts }));
+      pushed = await sendPushes(env, hash);
+    }
+    summary.push({ changed, alerts: alerts.length, pushed });
+  }
+  return summary;
+}
+
+// ---- Web Push (VAPID, empty message) ----
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function vapidJwt(env, aud) {
+  const enc = s => b64url(new TextEncoder().encode(JSON.stringify(s)));
+  const unsigned = `${enc({ typ: 'JWT', alg: 'ES256' })}.${enc({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'https://nramsay1212.github.io/shelf-value/' })}`;
+  const key = await crypto.subtle.importKey('jwk', JSON.parse(env.VAPID_PRIVATE_JWK), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(unsigned));
+  return `${unsigned}.${b64url(sig)}`;
+}
+
+async function sendPushes(env, hash) {
+  if (!env.VAPID_PRIVATE_JWK || !env.VAPID_PUBLIC) return 0;
+  const subs = (await env.SYNC.get('push:' + hash, 'json')) || [];
+  const keep = [];
+  let sent = 0;
+  for (const s of subs) {
+    try {
+      const r = await fetch(s.endpoint, {
+        method: 'POST',
+        headers: { TTL: '86400', Urgency: 'high', 'Content-Length': '0',
+          Authorization: `vapid t=${await vapidJwt(env, new URL(s.endpoint).origin)}, k=${env.VAPID_PUBLIC}` },
+      });
+      if (r.status === 404 || r.status === 410) continue; // phone unsubscribed
+      if (r.ok) sent++;
+      keep.push(s);
+    } catch { keep.push(s); }
+  }
+  if (keep.length !== subs.length) await env.SYNC.put('push:' + hash, JSON.stringify(keep));
+  return sent;
+}
+
 function json(body, status, headers) {
   return new Response(JSON.stringify(body), { status, headers: { ...headers, 'Content-Type': 'application/json' } });
 }
@@ -108,7 +262,7 @@ export default {
     const allowed = (env.ALLOWED_ORIGINS || DEFAULT_ORIGINS).split(',').map(s => s.trim());
     const cors = {
       'Access-Control-Allow-Origin': allowed.includes(origin) ? origin : allowed[0],
-      'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-Sync-Code',
       Vary: 'Origin',
     };
@@ -119,8 +273,14 @@ export default {
       if (origin && !allowed.includes(origin)) return json({ error: 'Origin not allowed' }, 403, cors);
       return handleSync(req, env, url, cors);
     }
+    // Manual run of the daily job (for testing); needs the invite code.
+    if (url.pathname === '/admin/run-daily' && req.method === 'POST') {
+      if (!env.SYNC || !env.INVITE_CODE || req.headers.get('X-Admin') !== env.INVITE_CODE) return json({ error: 'Not allowed' }, 403, cors);
+      return json(await runDaily(env, { reset: url.searchParams.get('reset') === '1' }), 200, cors);
+    }
     if (url.pathname !== '/search') {
-      return json({ ok: true, service: 'shelf-value-ebay', keysSet: !!(env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET), sync: !!env.SYNC }, 200, cors);
+      return json({ ok: true, service: 'shelf-value-ebay', keysSet: !!(env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET),
+        sync: !!env.SYNC, vapidPublicKey: env.VAPID_PUBLIC || null }, 200, cors);
     }
     if (origin && !allowed.includes(origin)) return json({ error: 'Origin not allowed' }, 403, cors);
 
@@ -164,5 +324,10 @@ export default {
     } catch (err) {
       return json({ error: err.message }, 500, cors);
     }
+  },
+
+  // Runs on the schedule set in Cloudflare (every 30 minutes).
+  async scheduled(event, env, ctx) {
+    if (env.SYNC) ctx.waitUntil(runDaily(env));
   },
 };

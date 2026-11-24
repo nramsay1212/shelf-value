@@ -71,3 +71,14 @@ In **⚙ Settings → Back up & sync**, enter the invite code to create a collec
 gets their own code and their own separate collection. Only a SHA-256 fingerprint of each code is stored.
 
 Worker setup for sync: bind a KV namespace as `SYNC` and add a secret `INVITE_CODE`.
+
+## Daily price history & wishlist alerts
+
+The worker runs every 30 minutes (Cloudflare cron, free). Once a day it looks up today's TCGplayer
+price for every raw card in each synced collection (in small batches to stay inside free limits),
+adds it to the card's price history, and checks wishlist target prices. When a wishlist card is at
+or below its target, the person's phones get a notification (Web Push; turn it on in ⚙ Settings —
+on iPhone the app must be opened from its Home Screen icon, iOS 16.4+).
+
+Worker setup: cron trigger `*/30 * * * *`, plain-text variable `VAPID_PUBLIC` and secret
+`VAPID_PRIVATE_JWK` (a P-256 key pair).

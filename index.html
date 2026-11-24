@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -349,6 +349,11 @@
             <button type="button" id="syncNow">Sync now</button>
             <button type="button" id="syncOffBtn" class="danger">Turn off on this device</button>
           </div>
+          <h3>&#128276; Wishlist price alerts</h3>
+          <p class="muted small">Get a notification on this device when a wishlist card drops to your target price.
+            Prices are checked once a day, even when the app is closed.</p>
+          <p id="alertsHint" class="muted small" hidden></p>
+          <button type="button" id="alertsBtn">Turn on price alerts</button>
         </div>
         <p id="syncMsg" class="small"></p>
       </section>
@@ -369,7 +374,7 @@
   </dialog>
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.
