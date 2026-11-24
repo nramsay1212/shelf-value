@@ -1,27 +1,41 @@
 # Shelf Value
 
-A free, self-hosted price tracker for game and collectible collections.
+A free Pokémon card collection tracker with automatic prices.
 
-- Track items with platform, condition, quantity, what you paid and when
-- Log prices over time and see a chart per item and for your whole collection
-- Total value, cost basis and gain/loss at a glance
-- One-click **eBay sold listings** search for any item, so logging real prices is quick
-- Flags items you haven't re-priced in 90+ days
+**Live app:** https://nramsay1212.github.io/shelf-value/
+
+## Features
+
+- **Card lookup:** search any Pokémon TCG card by name and/or set, with card images
+- **Automatic prices:** TCGplayer market prices for each version (Normal, Holo, Reverse Holo, 1st Edition…), refreshed daily when you open the app
+- **Collection value chart:** value vs. total paid over time, with 1M / 3M / 6M / 1Y / All ranges
+- **Categories:** group cards however you like (Binder 1, Vintage, For trade…) and filter by them
+- **Wishlist:** track cards you want, with a target price that's highlighted when the market drops to it
+- **Grading picks:** for raw Near Mint cards, enter recent PSA 10 / PSA 9 sold prices and get a
+  "Grade it / Borderline / Keep it raw" verdict, based on your grading fees and odds of a 10
+- **Graded cards and sealed product:** track them too, with prices you log yourself
+- One-click **eBay sold listings** and **TCGplayer** links for every item
 - Export/import as JSON (backup) or CSV (spreadsheet)
-- Light and dark mode
 
-Everything is stored in your browser's local storage. Nothing is sent anywhere.
-Export a JSON backup now and then, and use it to move your data between browsers or devices.
+## Your data
 
-## Run it
+Everything is stored in your browser's local storage; nothing is uploaded.
+Each browser/device has its own copy, so use **Data → Export backup** and **Import** to move it, and back up now and then.
 
-It's plain HTML/CSS/JS with no build step.
+## How prices work
 
-- **Online:** enable GitHub Pages for this repo (Settings → Pages → deploy from `main`, root).
-- **Locally:** `powershell -ExecutionPolicy Bypass -File serve.ps1`, then open http://localhost:8080
+Card data and prices come from the free [TCGdex](https://tcgdex.dev) API, which provides TCGplayer market prices (USD).
+These reflect Near Mint raw cards. Price history builds up from the days you open the app.
+Graded cards and sealed product don't have automatic prices; log them from eBay sold listings.
 
-## CSV format
+## Run locally
 
-`name,platform,condition,qty,paid,acquired,notes,price_date,price,price_source`
+Plain HTML/CSS/JS, no build step:
 
-One row per price point; rows with the same name + platform + condition are grouped into one item.
+```powershell
+powershell -ExecutionPolicy Bypass -File serve.ps1
+```
+
+Then open http://localhost:8080
+
+Not affiliated with Nintendo, The Pokémon Company, TCGplayer, or any grading company.

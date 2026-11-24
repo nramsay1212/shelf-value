@@ -3,85 +3,174 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Shelf Value - collection price tracker</title>
+  <title>Shelf Value - Pokémon card collection tracker</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
     <h1>Shelf Value</h1>
-    <p class="sub">Track what your collection is worth. Your data stays in this browser.</p>
+    <p class="sub">Pokémon card collection tracker with free, automatic TCGplayer market prices. Your collection stays in this browser.</p>
   </header>
 
   <main>
+    <!-- Value chart -->
+    <section class="card hero">
+      <div class="hero-head">
+        <div>
+          <div class="muted small-caps">Collection value</div>
+          <div class="big" id="heroValue">$0.00</div>
+          <div id="heroChange" class="muted"></div>
+        </div>
+        <div class="hero-side">
+          <div class="ranges" id="ranges">
+            <button data-range="30">1M</button><button data-range="90">3M</button>
+            <button data-range="180">6M</button><button data-range="365">1Y</button>
+            <button data-range="0" class="on">All</button>
+          </div>
+          <div class="refresh">
+            <span id="refreshStatus" class="muted"></span>
+            <button id="refreshBtn">Refresh prices</button>
+          </div>
+        </div>
+      </div>
+      <div id="totalChart" class="chart tall"></div>
+      <div class="legend"><span class="key value"></span>Market value <span class="key paid"></span>Total paid</div>
+    </section>
+
     <section class="stats" id="stats"></section>
 
     <section class="card">
-      <h2>Collection value over time</h2>
-      <div id="totalChart" class="chart"></div>
-    </section>
+      <div class="tabs views" id="viewTabs">
+        <button data-view="collection" class="on">Collection</button>
+        <button data-view="wishlist">Wishlist</button>
+        <button data-view="grading">Grading picks</button>
+      </div>
 
-    <section class="card">
-      <div class="toolbar">
-        <input id="search" type="search" placeholder="Search items...">
-        <select id="platformFilter"><option value="">All platforms</option></select>
+      <div class="toolbar" id="listToolbar">
+        <input id="search" type="search" placeholder="Search...">
+        <select id="categoryFilter"><option value="">All categories</option></select>
+        <select id="setFilter"><option value="">All sets</option></select>
+        <select id="typeFilter">
+          <option value="">Everything</option>
+          <option value="raw">Raw cards</option>
+          <option value="graded">Graded cards</option>
+          <option value="sealed">Sealed product</option>
+        </select>
         <select id="sort">
           <option value="value-desc">Value: high to low</option>
           <option value="value-asc">Value: low to high</option>
           <option value="name-asc">Name A to Z</option>
           <option value="gain-desc">Gain: high to low</option>
-          <option value="updated-asc">Least recently priced</option>
+          <option value="change-desc">Biggest movers</option>
+          <option value="added-desc">Recently added</option>
         </select>
         <span class="spacer"></span>
-        <button id="addBtn" class="primary">+ Add item</button>
+        <button id="addBtn" class="primary">+ Add</button>
         <div class="menu">
           <button id="dataBtn">Data &#9662;</button>
           <div class="menu-list" id="dataMenu" hidden>
             <button data-act="export-json">Export backup (JSON)</button>
             <button data-act="export-csv">Export CSV</button>
             <button data-act="import">Import JSON / CSV...</button>
-            <button data-act="demo">Load demo data</button>
             <button data-act="clear" class="danger">Delete all data</button>
           </div>
         </div>
         <input id="fileInput" type="file" accept=".json,.csv" hidden>
       </div>
+
+      <div id="gradingSettings" class="grading-settings" hidden>
+        <p class="muted">Raw Near Mint cards worth at least the minimum below. Enter recent PSA 10 / PSA 9 sold prices on a card to get a verdict.
+          Grading fees change often, so set yours to match the service you use.</p>
+        <div class="row inline">
+          <label>Grading fee per card ($) <input id="gFee" type="number" min="0" step="1"></label>
+          <label>Shipping &amp; insurance per card ($) <input id="gExtra" type="number" min="0" step="1"></label>
+          <label>Minimum raw value ($) <input id="gMin" type="number" min="0" step="1"></label>
+          <label>Default chance of a 10 (%) <input id="gP10" type="number" min="0" max="100" step="1"></label>
+        </div>
+      </div>
+
       <div class="table-wrap">
-        <table id="itemsTable">
-          <thead>
-            <tr>
-              <th>Item</th><th>Platform</th><th>Condition</th><th class="num">Qty</th>
-              <th class="num">Paid</th><th class="num">Value</th><th class="num">Last change</th>
-              <th class="num">Gain</th><th>Last priced</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-        <p id="empty" class="empty" hidden>No items yet. Click <b>+ Add item</b>, or load demo data from the Data menu.</p>
+        <table id="itemsTable"><thead></thead><tbody></tbody></table>
+        <p id="empty" class="empty" hidden></p>
       </div>
     </section>
+
+    <footer class="foot">
+      Card data, images and prices from <a href="https://tcgdex.dev" target="_blank" rel="noopener">TCGdex</a> (TCGplayer market prices, USD).
+      Not affiliated with Nintendo, The Pokémon Company, TCGplayer, or any grading company.
+    </footer>
   </main>
 
-  <dialog id="itemDialog">
-    <form id="itemForm" method="dialog">
-      <h2 id="itemDialogTitle">Add item</h2>
-      <label>Name <input name="name" required placeholder="e.g. Chrono Quest"></label>
-      <div class="row">
-        <label>Platform / set <input name="platform" list="platformList" placeholder="e.g. SNES"></label>
-        <label>Condition
-          <select name="condition">
-            <option>Loose</option><option>Complete (CIB)</option><option>New / Sealed</option>
-            <option>Graded</option><option>Box only</option><option>Manual only</option>
-          </select>
-        </label>
+  <!-- Add / edit -->
+  <dialog id="itemDialog" class="wide">
+    <form id="itemForm">
+      <div class="detail-head">
+        <h2 id="itemDialogTitle">Add</h2>
+        <button type="button" data-close class="icon" aria-label="Close">&#10005;</button>
       </div>
+
+      <div class="row tabs-row">
+        <div class="tabs" id="listTabs">
+          <button type="button" data-list="collection" class="on">Collection</button>
+          <button type="button" data-list="wishlist">Wishlist</button>
+        </div>
+        <div class="tabs" id="kindTabs">
+          <button type="button" data-kind="card" class="on">Card</button>
+          <button type="button" data-kind="sealed">Sealed product</button>
+        </div>
+      </div>
+
+      <div id="cardPicker">
+        <div class="row inline">
+          <label class="grow">Card name <input id="cardQuery" placeholder="e.g. Charizard, Pikachu ex, Umbreon VMAX"></label>
+          <label>Set <select id="setSelect"><option value="">Any set</option></select></label>
+          <button type="button" id="searchBtn" class="primary">Search</button>
+        </div>
+        <div id="results" class="results"></div>
+      </div>
+
+      <div id="picked" class="picked" hidden></div>
+
+      <div id="sealedFields" hidden>
+        <div class="row">
+          <label class="grow">Product name <input name="sealedName" placeholder="e.g. 151 Elite Trainer Box"></label>
+          <label>Type
+            <select name="productType">
+              <option>Booster Box</option><option>Elite Trainer Box</option><option>Booster Bundle</option>
+              <option>Booster Pack</option><option>Collection Box</option><option>Tin</option><option>Other</option>
+            </select>
+          </label>
+        </div>
+        <label>Set (optional) <select name="sealedSet"><option value="">None</option></select></label>
+      </div>
+
+      <div id="cardFields">
+        <div class="row">
+          <label>Version <select name="variant"></select></label>
+          <label>Condition
+            <select name="condition">
+              <option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option>
+              <option>Heavily Played</option><option>Damaged</option><option>Graded</option>
+            </select>
+          </label>
+          <label class="gradeField">Grader
+            <select name="grader"><option>PSA</option><option>CGC</option><option>BGS</option><option>TAG</option><option>ACE</option><option>Other</option></select>
+          </label>
+          <label class="gradeField">Grade <input name="grade" placeholder="e.g. 10"></label>
+        </div>
+      </div>
+
       <div class="row">
+        <label>Category <input name="category" list="categoryList" placeholder="e.g. Binder 1, Vintage, For trade"></label>
         <label>Quantity <input name="qty" type="number" min="1" step="1" value="1"></label>
-        <label>Paid (each) <input name="paid" type="number" min="0" step="0.01" placeholder="0.00"></label>
-        <label>Acquired <input name="acquired" type="date"></label>
+        <label class="collectionOnly">Paid (each, $) <input name="paid" type="number" min="0" step="0.01" placeholder="0.00"></label>
+        <label class="collectionOnly">Acquired <input name="acquired" type="date"></label>
+        <label class="wishlistOnly">Target price ($) <input name="target" type="number" min="0" step="0.01" placeholder="Alert at or below"></label>
       </div>
-      <label id="startPriceLabel">Current price (optional) <input name="startPrice" type="number" min="0" step="0.01" placeholder="Adds a first price point today"></label>
+      <datalist id="categoryList"></datalist>
+      <label id="manualPriceLabel">Current value (each, $) <input name="manualPrice" type="number" min="0" step="0.01" placeholder="Graded and sealed items are priced by you"></label>
       <label>Notes <textarea name="notes" rows="2"></textarea></label>
-      <datalist id="platformList"></datalist>
+      <p id="formError" class="error" hidden></p>
       <div class="actions">
         <button type="button" data-close>Cancel</button>
         <button type="submit" class="primary">Save</button>
@@ -89,26 +178,45 @@
     </form>
   </dialog>
 
+  <!-- Detail -->
   <dialog id="detailDialog" class="wide">
     <div class="detail-head">
-      <div>
-        <h2 id="dName"></h2>
-        <p id="dMeta" class="sub"></p>
+      <div class="detail-title">
+        <img id="dImg" alt="" hidden>
+        <div>
+          <h2 id="dName"></h2>
+          <p id="dMeta" class="sub"></p>
+          <p id="dLive" class="sub"></p>
+        </div>
       </div>
       <button data-close class="icon" aria-label="Close">&#10005;</button>
     </div>
     <div class="stats small" id="dStats"></div>
     <div id="itemChart" class="chart"></div>
     <div class="detail-actions">
-      <a id="ebayLink" target="_blank" rel="noopener">Check eBay sold listings &#8599;</a>
+      <a id="ebayLink" target="_blank" rel="noopener">eBay sold listings &#8599;</a>
+      <a id="tcgLink" target="_blank" rel="noopener" hidden>TCGplayer &#8599;</a>
       <span class="spacer"></span>
+      <button id="moveBtn" class="primary" hidden>I got it: move to collection</button>
       <button id="editBtn">Edit</button>
       <button id="deleteBtn" class="danger">Delete</button>
     </div>
+
+    <section id="gradeBox" class="grade-box" hidden>
+      <h3>Should you grade it?</h3>
+      <div class="row inline">
+        <label>PSA 10 sold price ($) <input id="gc10" type="number" min="0" step="0.01"></label>
+        <label>PSA 9 sold price ($) <input id="gc9" type="number" min="0" step="0.01"></label>
+        <label>Chance of a 10 (%) <input id="gcP" type="number" min="0" max="100" step="1"></label>
+      </div>
+      <p class="links"><a id="psa10Link" target="_blank" rel="noopener">PSA 10 sold on eBay &#8599;</a> · <a id="psa9Link" target="_blank" rel="noopener">PSA 9 sold on eBay &#8599;</a></p>
+      <div id="gradeResult"></div>
+    </section>
+
     <h3>Log a price</h3>
     <form id="priceForm" class="row inline">
       <label>Date <input name="date" type="date" required></label>
-      <label>Price <input name="price" type="number" min="0" step="0.01" required></label>
+      <label>Price (each, $) <input name="price" type="number" min="0" step="0.01" required></label>
       <label class="grow">Source / note <input name="source" placeholder="e.g. eBay sold, avg of 5"></label>
       <button type="submit" class="primary">Add</button>
     </form>
