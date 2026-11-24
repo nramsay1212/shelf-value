@@ -165,22 +165,27 @@ async function refreshItem(it) {
 
 async function refreshAll() {
   if (refreshing) return;
-  const list = items.filter(isAutoPriced);
-  if (!list.length) { updateRefreshStatus(); return; }
+  // TCGplayer prices for raw cards, then eBay ranges for graded, sealed and grading picks.
+  const jobs = items.filter(isAutoPriced).map(it => () => refreshItem(it));
+  const tcgCount = jobs.length;
+  if (workerUrl()) ebayTargets().forEach(it => jobs.push(() => refreshEbay(it)));
+  if (!jobs.length) { updateRefreshStatus(); return; }
   refreshing = true;
   $('#refreshBtn').disabled = true;
   cardCache.clear();
   let done = 0, failed = 0;
-  const queue = [...list];
+  const queue = [...jobs];
   async function worker() {
     while (queue.length) {
-      const it = queue.shift();
-      try { await refreshItem(it); } catch { failed++; }
+      const job = queue.shift();
+      try { await job(); } catch { failed++; }
       done++;
-      $('#refreshStatus').textContent = `Updating prices ${done}/${list.length}…`;
+      $('#refreshStatus').textContent = done <= tcgCount
+        ? `Updating TCGplayer prices ${done}/${tcgCount}…` : `Checking eBay ${done - tcgCount}/${jobs.length - tcgCount}…`;
     }
   }
-  await Promise.all(Array.from({ length: Math.min(4, list.length) }, worker));
+  // TCGplayer jobs first (fast), then eBay a few at a time.
+  await Promise.all(Array.from({ length: Math.min(3, jobs.length) }, worker));
   save();
   localStorage.setItem(REFRESH_KEY, String(Date.now()));
   refreshing = false;
@@ -319,15 +324,20 @@ function gradeEval(it) {
   const c = it.comps || {};
   const p = (c.p10 ?? settings.gP10) / 100;
   const cost = (settings.gFee || 0) + (settings.gExtra || 0);
-  if (!c.psa10 || !c.psa9) return { verdict: 'need', label: 'Needs PSA prices', raw, cost, p };
-  const ev = p * c.psa10 + (1 - p) * c.psa9 - cost;
+  // Your own sold prices win; otherwise use the eBay listing estimate.
+  const er = it.ebay?.ranges || {};
+  const psa10 = c.psa10 || (er['PSA 10']?.n >= 2 ? er['PSA 10'].est : null);
+  const psa9 = c.psa9 || (er['PSA 9']?.n >= 2 ? er['PSA 9'].est : null);
+  const fromEbay = (!c.psa10 && !!psa10) || (!c.psa9 && !!psa9);
+  if (!psa10 || !psa9) return { verdict: 'need', label: 'Needs PSA prices', raw, cost, p, psa10, psa9 };
+  const ev = p * psa10 + (1 - p) * psa9 - cost;
   const profit = ev - raw;
-  const worst = c.psa9 - cost - raw;
+  const worst = psa9 - cost - raw;
   let verdict, label;
   if (profit >= Math.max(15, raw * 0.2)) { verdict = 'go'; label = 'Grade it'; }
   else if (profit > 0) { verdict = 'maybe'; label = 'Borderline'; }
   else { verdict = 'no'; label = 'Keep it raw'; }
-  return { verdict, label, raw, cost, p, ev, profit, worst, psa10: c.psa10, psa9: c.psa9 };
+  return { verdict, label, raw, cost, p, ev, profit, worst, psa10, psa9, fromEbay };
 }
 
 const gradingCandidates = () => items.filter(it =>
@@ -717,6 +727,9 @@ itemForm.addEventListener('submit', e => {
     if (isAutoPriced(it) && opt) { it.tcgId = opt.productId; upsertPrice(it, today(), opt.price, 'TCGplayer market'); }
     else if (num(f.manualPrice.value) != null) upsertPrice(it, today(), num(f.manualPrice.value), 'Manual');
     items.push(it);
+    if (workerUrl() && !isAutoPriced(it)) {
+      refreshEbay(it).then(() => { save(); render(); if (detailId) renderDetail(); }).catch(() => {});
+    }
   }
   save();
   itemDialog.close();
@@ -730,6 +743,7 @@ itemForm.addEventListener('submit', e => {
 // =====================================================================
 const detailDialog = $('#detailDialog');
 let detailId = null;
+const ebayChecking = new Set();
 detailDialog.addEventListener('close', () => { detailId = null; tooltip.hidden = true; });
 
 function openDetail(id) {
@@ -784,8 +798,19 @@ function renderDetail() {
     $('#dLive').textContent = opts.length
       ? 'TCGplayer market now: ' + opts.map(o => `${o.label} ${money(o.price)}`).join(' · ')
       : 'No TCGplayer price for this card yet. Log prices yourself below.';
-    if (isGraded(it)) $('#dLive').textContent += ' (raw prices; graded cards are priced by you)';
+    if (isGraded(it)) $('#dLive').textContent += workerUrl()
+      ? ' (raw prices; this graded card is valued from eBay listings)' : ' (raw prices; graded cards are priced by you)';
   }).catch(() => {});
+
+  // eBay ranges: show what we have, fetch fresh ones if stale
+  renderEbayBox(it);
+  if (needsEbay(it) && !ebayChecking.has(it.id)) {
+    ebayChecking.add(it.id);
+    refreshEbay(it)
+      .then(() => { save(); render(); if (detailId === it.id) renderDetail(); })
+      .catch(err => { if (detailId === it.id) $('#ebayRanges').innerHTML = `<p class="error">Couldn't check eBay: ${esc(err.message)}</p>`; })
+      .finally(() => ebayChecking.delete(it.id));
+  }
 
   // grading box
   const showGrade = !wish && it.kind === 'card' && !isGraded(it);
@@ -796,6 +821,9 @@ function renderDetail() {
     $('#gc9').value = c.psa9 ?? '';
     $('#gcP').value = c.p10 ?? '';
     $('#gcP').placeholder = settings.gP10;
+    const er = it.ebay?.ranges || {};
+    $('#gc10').placeholder = er['PSA 10'] ? `eBay: ${money(er['PSA 10'].est)}` : '';
+    $('#gc9').placeholder = er['PSA 9'] ? `eBay: ${money(er['PSA 9'].est)}` : '';
     $('#psa10Link').href = ebayUrl(searchName(it) + ' PSA 10');
     $('#psa9Link').href = ebayUrl(searchName(it) + ' PSA 9');
     renderGradeResult(it);
@@ -826,7 +854,9 @@ function renderGradeResult(it) {
     <span class="${cls(g.profit)}"> Expected ${g.profit >= 0 ? 'profit' : 'loss'}: ${signedMoney(g.profit)}</span>
     <p class="math">${Math.round(g.p * 100)}% × ${money(g.psa10)} + ${Math.round((1 - g.p) * 100)}% × ${money(g.psa9)}
       − ${money(g.cost)} grading = ${money(g.ev)} expected, vs ${money(g.raw)} raw.
-      If it comes back a 9: ${signedMoney(g.worst)}. If it grades below 9 you'll usually lose money.</p>${warn}`;
+      If it comes back a 9: ${signedMoney(g.worst)}. If it grades below 9 you'll usually lose money.</p>
+    ${g.fromEbay ? `<p class="math">PSA prices are estimated from current eBay listings. For a sharper answer, check
+      recent sold prices with the links above and type them in.</p>` : ''}${warn}`;
 }
 
 ['gc10', 'gc9', 'gcP'].forEach(idName => $('#' + idName).addEventListener('input', () => {
@@ -980,12 +1010,194 @@ dataMenu.addEventListener('click', e => {
 });
 
 // =====================================================================
+// eBay price ranges (via your own Cloudflare Worker, see worker/ebay-worker.js)
+// =====================================================================
+const WORKER_KEY = 'shelf-value-worker';
+const workerUrl = () => (localStorage.getItem(WORKER_KEY) || '').replace(/\/+$/, '');
+const EBAY_MAX_AGE = 20 * 36e5; // re-check a listing range after ~a day
+
+async function workerSearch(q, type) {
+  const r = await fetch(`${workerUrl()}/search?type=${type}&q=${encodeURIComponent(q)}`);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || `${r.status} from price worker`);
+  return body.items || [];
+}
+
+const quantile = (sorted, q) => {
+  if (!sorted.length) return null;
+  const pos = (sorted.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+};
+function rangeStats(prices) {
+  const s = [...prices].sort((a, b) => a - b);
+  const trim = s.length >= 8;
+  return {
+    n: s.length, min: s[0],
+    low: trim ? quantile(s, 0.1) : s[0], high: trim ? quantile(s, 0.9) : s[s.length - 1],
+    median: quantile(s, 0.5),
+    est: quantile(s, 0.25), // asking prices run high, so the lower quartile is the value estimate
+  };
+}
+
+const JUNK = /\b(lot|lots|bundle|proxy|custom|replica|fake|orica|reprint|digital|code cards?|jumbo|oversized|metal|gold plated|japanese|japan|jpn|korean|chinese|choose|pick|you pick|u pick|complete set|binder|sleeve|toploader|empty)\b/i;
+const GRADE_RE = /\b(PSA|CGC|BGS|BECKETT|SGC|TAG|ACE)\b[\s\-:#]*(?:(?:GEM|GEM-MT|GEM MT|GEM MINT|MINT|PRISTINE|PERFECT|BLACK LABEL|NM-MT|NM)\s*)*(10|9\.5|9|8\.5|8|7\.5|7|6|5|4|3|2|1)(?![\d.])/i;
+const SEALED_TYPES = {
+  'Booster Box': /booster box|display box|36\s*packs?/i,
+  'Elite Trainer Box': /elite trainer|\betb\b/i,
+  'Booster Bundle': /bundle/i,
+  'Booster Pack': /\bpacks?\b/i,
+  'Collection Box': /collection|premium|box/i,
+  'Tin': /\btin\b/i,
+};
+
+function bucketOf(it) {
+  if (it.kind !== 'card') return 'Sealed';
+  if (!isGraded(it)) return 'Raw';
+  const g = (it.grader || '').toUpperCase().replace('BECKETT', 'BGS');
+  return `${g} ${String(it.grade || '').trim()}`;
+}
+
+function cardNumberMatches(title, number) {
+  if (!number) return true;
+  const local = String(number).split('/')[0].trim();
+  const n = parseInt(local, 10);
+  if (String(n) === local.replace(/^0+(?=\d)/, '')) {
+    return new RegExp(`(^|[^\\d.])0*${n}(?![\\d.])`).test(title);
+  }
+  return title.toLowerCase().includes(local.toLowerCase());
+}
+
+// Turn raw listings into price ranges per grade (or for a sealed product).
+function analyzeListings(listings, it) {
+  const seen = new Set(), buckets = {};
+  const nameWord = (it.name || '').toLowerCase().split(/[\s'’]+/).find(w => w.length > 2) || '';
+  listings.forEach(l => {
+    if (!l.url || seen.has(l.url)) return;
+    seen.add(l.url);
+    const t = l.title || '';
+    if (JUNK.test(t)) return;
+    let key;
+    if (it.kind === 'card') {
+      if (nameWord && !t.toLowerCase().includes(nameWord)) return;
+      if (!cardNumberMatches(t, it.number)) return;
+      const m = t.match(GRADE_RE);
+      if (m) key = `${m[1].toUpperCase().replace('BECKETT', 'BGS')} ${m[2]}`;
+      else if (/\b(graded|slab|psa|cgc|bgs|sgc|beckett)\b/i.test(t)) return; // graded but grade unclear
+      else key = 'Raw';
+    } else {
+      if (!/sealed|factory|new/i.test(t) || /\b(opened|case of|no packs?)\b/i.test(t)) return;
+      const typeRe = SEALED_TYPES[it.productType];
+      if (typeRe && !typeRe.test(t)) return;
+      if (it.productType === 'Booster Pack' && /\bbox\b/i.test(t)) return;
+      const setWord = (it.setName || '').toLowerCase().split(/\s+/).find(w => w.length > 2);
+      if (setWord && !t.toLowerCase().includes(setWord)) return;
+      key = 'Sealed';
+    }
+    (buckets[key] = buckets[key] || []).push(l);
+  });
+  const out = {};
+  Object.entries(buckets).forEach(([k, ls]) => {
+    ls.sort((a, b) => a.price - b.price);
+    out[k] = { ...rangeStats(ls.map(l => l.price)), cheapest: ls.slice(0, 3).map(l => ({ t: l.title, p: l.price, u: l.url })) };
+  });
+  return out;
+}
+
+async function refreshEbay(it) {
+  if (!workerUrl()) return;
+  let listings;
+  if (it.kind === 'card') {
+    const base = `pokemon ${it.name} ${it.number || ''}`.trim();
+    const extra = isGraded(it) && it.grader && it.grader !== 'PSA' && it.grader !== 'Other' ? it.grader : 'PSA';
+    const [a, b] = await Promise.all([workerSearch(base, 'card'), workerSearch(`${base} ${extra}`, 'card')]);
+    listings = a.concat(b);
+  } else {
+    const q = it.setName && !it.name.toLowerCase().includes(it.setName.toLowerCase())
+      ? `pokemon ${it.setName} ${it.name}` : `pokemon ${it.name}`;
+    listings = await workerSearch(q, 'sealed');
+  }
+  it.ebay = { fetched: Date.now(), ranges: analyzeListings(listings, it) };
+  // Graded cards and sealed product take their value from eBay; raw cards keep TCGplayer.
+  const mine = it.ebay.ranges[bucketOf(it)];
+  if (!isAutoPriced(it) && mine && mine.n >= 2) upsertPrice(it, today(), Math.round(mine.est * 100) / 100, 'eBay listings');
+}
+
+const needsEbay = it => !!workerUrl() && (!it.ebay || Date.now() - it.ebay.fetched > EBAY_MAX_AGE);
+const ebayTargets = () => items.filter(it =>
+  it.kind !== 'card' || isGraded(it) ||
+  (it.list === 'collection' && it.condition === 'Near Mint' && itemStats(it).unit >= (settings.gMin || 0)));
+
+function renderEbayBox(it) {
+  const box = $('#ebayBox');
+  box.hidden = !workerUrl();
+  if (!workerUrl()) return;
+  const el = $('#ebayRanges');
+  if (!it.ebay) { el.innerHTML = '<p class="muted small">Checking eBay…</p>'; return; }
+  const order = k => k === 'Raw' || k === 'Sealed' ? 100 : -parseFloat(k.split(' ')[1]) + (k.startsWith('PSA') ? 0 : 0.01);
+  const entries = Object.entries(it.ebay.ranges).sort((a, b) => order(a[0]) - order(b[0]) || a[0].localeCompare(b[0]));
+  if (!entries.length) { el.innerHTML = '<p class="muted small">No matching eBay listings right now.</p>'; return; }
+  const max = Math.max(...entries.map(([, r]) => r.high));
+  const pos = v => (v / max * 100).toFixed(1) + '%';
+  const mineKey = bucketOf(it);
+  el.innerHTML = `<div class="ranges-list">${entries.map(([k, r]) => `
+    <div class="range-row ${k === mineKey ? 'mine' : ''}">
+      <span class="grade">${esc(k)}</span>
+      <div class="bar"><div class="span" style="left:${pos(r.low)};width:calc(${pos(r.high - r.low)} + 2px)"></div>
+        <div class="est" style="left:${pos(r.est)}"></div></div>
+      <span class="nums">${money(r.low)} – ${money(r.high)}<small>typical ${money(r.est)} · ${r.n} listing${r.n > 1 ? 's' : ''}</small></span>
+    </div>`).join('')}</div>
+    ${(it.ebay.ranges[mineKey]?.cheapest || []).length ? `<p class="muted small">Cheapest ${esc(mineKey)} listings:</p>
+      <ul class="listings">${it.ebay.ranges[mineKey].cheapest.map(l =>
+        `<li><a href="${esc(l.u)}" target="_blank" rel="noopener">${money(l.p)}</a> ${esc(l.t)}</li>`).join('')}</ul>` : ''}
+    <p class="muted small">Current Buy It Now prices incl. shipping, checked ${fmtDate(toISO(new Date(it.ebay.fetched)))}.
+      Asking prices run higher than sales, so "typical" uses the cheaper end of the range.</p>`;
+}
+
+$('#ebayRefresh').addEventListener('click', async () => {
+  const it = items.find(i => i.id === detailId);
+  if (!it) return;
+  $('#ebayRanges').innerHTML = '<p class="muted small">Checking eBay…</p>';
+  try { await refreshEbay(it); save(); render(); renderDetail(); }
+  catch (err) { $('#ebayRanges').innerHTML = `<p class="error">Couldn't check eBay: ${esc(err.message)}</p>`; }
+});
+
+const settingsDialog = $('#settingsDialog');
+$('#settingsBtn').addEventListener('click', () => {
+  $('#workerUrl').value = workerUrl();
+  $('#workerStatus').textContent = workerUrl() ? 'Connected.' : 'Not set up yet.';
+  settingsDialog.showModal();
+});
+$('#workerRemove').addEventListener('click', () => {
+  localStorage.removeItem(WORKER_KEY);
+  $('#workerUrl').value = '';
+  $('#workerStatus').textContent = 'Removed.';
+});
+$('#settingsForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  let url = $('#workerUrl').value.trim().replace(/\/+$/, '');
+  if (!url) { $('#workerStatus').textContent = 'Paste your worker address first.'; return; }
+  if (!/^https?:\/\//.test(url)) url = 'https://' + url;
+  $('#workerStatus').textContent = 'Testing…';
+  try {
+    const info = await (await fetch(url)).json();
+    if (info.service !== 'shelf-value-ebay') throw new Error("that address isn't a Shelf Value worker");
+    if (!info.keysSet) throw new Error('the worker is running, but its EBAY_CLIENT_ID / EBAY_CLIENT_SECRET secrets are missing');
+    localStorage.setItem(WORKER_KEY, url);
+    const test = await workerSearch('pokemon charizard', 'card');
+    $('#workerStatus').innerHTML = `<span class="ok">✓ Connected to eBay</span> (test search found ${test.length} listings).`;
+    refreshAll();
+  } catch (err) {
+    $('#workerStatus').textContent = "Couldn't connect: " + err.message;
+  }
+});
+
+// =====================================================================
 // Start
 // =====================================================================
 render();
 updateRefreshStatus();
 loadSets().then(() => {
   const last = +localStorage.getItem(REFRESH_KEY);
-  if (items.some(isAutoPriced) && Date.now() - last > 12 * 36e5) refreshAll();
+  if (items.length && Date.now() - last > 12 * 36e5) refreshAll();
 });
 setInterval(updateRefreshStatus, 60e3);

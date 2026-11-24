@@ -8,6 +8,7 @@
 </head>
 <body>
   <header class="top">
+    <button id="settingsBtn" class="settings-btn">&#9881; Settings</button>
     <h1>Shelf Value</h1>
     <p class="sub">Pokémon card collection tracker with free, automatic TCGplayer market prices. Your collection stays in this browser.</p>
   </header>
@@ -202,6 +203,14 @@
       <button id="deleteBtn" class="danger">Delete</button>
     </div>
 
+    <section id="ebayBox" class="grade-box" hidden>
+      <div class="card-head">
+        <h3>eBay asking prices right now</h3>
+        <button type="button" id="ebayRefresh" class="small-btn">Check again</button>
+      </div>
+      <div id="ebayRanges"></div>
+    </section>
+
     <section id="gradeBox" class="grade-box" hidden>
       <h3>Should you grade it?</h3>
       <div class="row inline">
@@ -225,6 +234,28 @@
       <thead><tr><th>Date</th><th class="num">Price</th><th>Source</th><th></th></tr></thead>
       <tbody id="priceRows"></tbody>
     </table>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="settingsDialog">
+    <form id="settingsForm">
+      <div class="detail-head">
+        <h2>Settings</h2>
+        <button type="button" data-close class="icon" aria-label="Close">&#10005;</button>
+      </div>
+      <p class="muted small">For graded (PSA/CGC/BGS), raw and sealed price ranges from current eBay listings,
+        paste the address of your eBay price worker (see the README on GitHub for the 10-minute free setup).
+        It's saved only in this browser.</p>
+      <label>eBay price worker address
+        <input id="workerUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://shelf-value-ebay.yourname.workers.dev">
+      </label>
+      <p id="workerStatus" class="muted small"></p>
+      <div class="actions">
+        <button type="button" id="workerRemove" class="danger">Remove</button>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Save &amp; test</button>
+      </div>
+    </form>
   </dialog>
 
   <div id="tooltip" class="tooltip" hidden></div>

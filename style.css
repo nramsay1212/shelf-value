@@ -218,3 +218,25 @@ td.name small, .picked small { display: block; color: var(--muted); font-weight:
 @media (prefers-color-scheme: dark) { .verdict.maybe { color: #e6b450; } }
 .math { font-size: 13px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
 .hit { color: var(--up); font-weight: 600; }
+
+/* settings */
+.top { position: relative; }
+.settings-btn { position: absolute; right: 20px; top: 28px; }
+.small { font-size: 13px; }
+#settingsDialog a { color: var(--accent); }
+.ok { color: var(--up); }
+
+/* eBay ranges */
+.small-btn { padding: 3px 10px; font-size: 13px; }
+.ranges-list { display: grid; gap: 10px; margin-bottom: 6px; }
+.range-row { display: grid; grid-template-columns: 90px 1fr 210px; gap: 12px; align-items: center; font-size: 14px; font-variant-numeric: tabular-nums; }
+.range-row.mine .grade { color: var(--accent); }
+.range-row .grade { font-weight: 650; }
+.range-row .nums { text-align: right; }
+.range-row .nums small { color: var(--muted); display: block; font-size: 12px; }
+.bar { position: relative; height: 8px; background: var(--row-hover); border-radius: 4px; }
+.bar .span { position: absolute; top: 0; bottom: 0; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 4px; }
+.bar .est { position: absolute; top: -4px; width: 3px; height: 16px; background: var(--accent); border-radius: 2px; }
+.listings { font-size: 13px; margin: 6px 0 0; padding-left: 18px; }
+.listings a { color: var(--accent); }
+@media (max-width: 600px) { .range-row { grid-template-columns: 70px 1fr; } .range-row .nums { grid-column: 1 / -1; text-align: left; } }
