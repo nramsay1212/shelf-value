@@ -270,3 +270,30 @@ body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-are
   th, td { padding: 8px 6px; }
   td.name { min-width: 0; }
 }
+
+/* form fields never grow wider than their box (long set names in dropdowns used to push things around) */
+label input, label select, label textarea { width: 100%; min-width: 0; }
+.row > label { min-width: 0; }
+select { max-width: 100%; text-overflow: ellipsis; }
+
+@media (max-width: 640px) {
+  /* 16px text stops iPhone zooming in when you tap a box */
+  input, select, textarea, button { font-size: 16px; }
+  /* Add screen: stack the search fields full width */
+  #cardPicker .row > *, #sealedFields .row > *, #cardFields .row > *, #itemForm > .row > * { flex: 1 1 100%; }
+  #cardPicker .row > button { width: 100%; }
+  .tabs-row { flex-direction: column; }
+  .tabs-row .tabs { width: 100%; display: flex; }
+  .tabs-row .tabs button { flex: 1; }
+  #priceForm > *, .grade-box .row > *, .grading-settings .row > * { flex: 1 1 100%; }
+  dialog, dialog.wide { width: calc(100vw - 16px); max-width: none; max-height: calc(100dvh - 24px); }
+  .results { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); max-height: 50dvh; }
+  .picked img { width: 64px; }
+}
+@media (max-width: 640px) {
+  /* stack the Collection/Wishlist and Card/Sealed toggles instead of wrapping off-screen */
+  #itemForm > .tabs-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  #itemForm > .tabs-row > .tabs { width: 100%; }
+}
+/* belt and braces: nothing inside a popup may push it wider than the screen */
+dialog { overflow-x: hidden; }

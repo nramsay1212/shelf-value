@@ -251,12 +251,28 @@ function collectionSeries(rangeDays) {
 const tooltip = $('#tooltip');
 
 // lines: [{ values: [...], cls: 'line' | 'line paid', label }], all aligned to dates
+// Charts are drawn at their box's real pixel size. If the box has no size yet
+// (app still starting, dialog not open) or changes size (phone rotated), the
+// ResizeObserver below redraws it, so the chart is never stretched or squished.
+const chartObserver = new ResizeObserver(entries => entries.forEach(({ target }) => {
+  const w = Math.round(target.clientWidth);
+  if (target._chart && w && w !== target._drawnWidth) renderChart(target, ...target._chart);
+}));
+
 function renderChart(container, dates, lines, emptyMsg) {
+  container._chart = [dates, lines, emptyMsg];
+  chartObserver.observe(container);
   if (dates.length < 2) {
     container.innerHTML = `<div class="chart-empty">${esc(emptyMsg)}</div>`;
     return;
   }
-  const W = container.clientWidth || 600, H = container.clientHeight || 220;
+  const W = Math.round(container.clientWidth), H = container.clientHeight || 220;
+  if (!W) { // drawn once it has a size
+    container.innerHTML = ''; container._drawnWidth = 0;
+    requestAnimationFrame(() => { if (container.clientWidth && !container._drawnWidth) renderChart(container, ...container._chart); });
+    return;
+  }
+  container._drawnWidth = W;
   const m = { t: 10, r: 12, b: 24, l: 64 };
   const t = dates.map(d => new Date(d + 'T00:00:00').getTime());
   const allVals = lines.flatMap(l => l.values);
@@ -533,11 +549,6 @@ $('#ranges').addEventListener('click', e => {
 $('#itemsTable tbody').addEventListener('click', e => {
   const tr = e.target.closest('tr[data-id]');
   if (tr) openDetail(tr.dataset.id);
-});
-let resizeTimer;
-window.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { renderHero(); if (detailId) renderDetail(); }, 150);
 });
 
 // =====================================================================
