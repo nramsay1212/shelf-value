@@ -1,5 +1,5 @@
 // Shelf Value service worker: lets the app open offline and caches card images.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL = `shelf-shell-${VERSION}`;
 const IMAGES = 'shelf-images';
 const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
@@ -22,7 +22,7 @@ self.addEventListener('fetch', e => {
 
   // The app itself: network first so updates show up, cached copy when offline.
   if (url.origin === location.origin) {
-    e.respondWith(fetch(req).then(res => {
+    e.respondWith(fetch(req, { cache: 'no-cache' }).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(SHELL).then(c => c.put(req, copy)); }
       return res;
     }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));
