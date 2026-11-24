@@ -375,3 +375,31 @@ dialog.pick { width: min(420px, 94vw); }
 @media (prefers-color-scheme: dark) { .scan-warn { color: #e6b450; } }
 #camView { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: #000; }
 #camView::backdrop { background: #000; }
+
+/* ---------- Set browser ---------- */
+#setSearch { flex: 1; min-width: 200px; }
+.check { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.check input { width: auto; }
+.era { margin: 18px 0 8px; display: flex; align-items: baseline; gap: 10px; }
+.era h3 { margin: 0; color: var(--text); text-transform: none; letter-spacing: 0; font-size: 16px; }
+.set-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.set-card { display: grid; grid-template-columns: 76px 1fr; gap: 10px; align-items: center; text-align: left;
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--card); }
+.set-card:hover { border-color: var(--accent); background: var(--card); }
+.set-card img, .set-card .nologo { width: 76px; height: 40px; object-fit: contain; }
+.set-card .nologo { display: grid; place-items: center; font-size: 11px; color: var(--muted); background: var(--row-hover); border-radius: 6px; }
+.set-card b { display: block; font-size: 14px; line-height: 1.25; }
+.set-card small { color: var(--muted); font-size: 12px; }
+.set-card .mini { height: 4px; background: var(--row-hover); border-radius: 2px; margin-top: 5px; overflow: hidden; }
+.set-card .mini span { display: block; height: 100%; background: var(--up); }
+.set-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.set-head img { height: 48px; max-width: 140px; object-fit: contain; }
+.set-head h2 { font-size: 19px; }
+#setCardSearch { flex: 1; min-width: 160px; }
+.tile .price { display: block; color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .rar { display: block; font-size: 11px; }
+@media (max-width: 640px) {
+  .set-cards { grid-template-columns: minmax(0, 1fr); }
+  .set-head img { height: 36px; }
+  #setSort { flex: 1 1 100%; }
+}

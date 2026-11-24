@@ -6,7 +6,7 @@
 const STORE_KEY = 'shelf-value-v1';
 const SETTINGS_KEY = 'shelf-value-settings';
 const REFRESH_KEY = 'shelf-value-last-refresh';
-const SETS_KEY = 'shelf-value-sets';
+const SETS_KEY = 'shelf-value-sets-v2';
 const API = 'https://api.tcgdex.net/v2/en';
 
 const DEFAULT_SETTINGS = { gFee: 25, gExtra: 5, gMin: 30, gP10: 30 };
@@ -109,7 +109,7 @@ async function loadSets() {
   if (cached && Date.now() - cached.t < 3 * 864e5) sets = cached.data;
   else {
     try {
-      sets = (await getJSON(`${API}/sets`)).map(s => ({ id: s.id, name: s.name, official: s.cardCount?.official }));
+      sets = (await getJSON(`${API}/sets`)).filter(s => !isPocket(s.id)).map(s => ({ id: s.id, name: s.name, official: s.cardCount?.official }));
       localStorage.setItem(SETS_KEY, JSON.stringify({ t: Date.now(), data: sets }));
     } catch { sets = cached?.data || []; }
   }
@@ -120,6 +120,8 @@ async function loadSets() {
 }
 
 const setIdOf = cardId => cardId.slice(0, cardId.lastIndexOf('-'));
+// Pokémon TCG Pocket (the phone game) sets: A1, A2b, B1a, P-A ... not physical cards.
+const isPocket = setId => /^([AB]\d+[a-z]?|P-[AB])$/.test(setId);
 
 async function getCard(id) {
   if (cardCache.has(id)) return cardCache.get(id);
@@ -434,7 +436,7 @@ function render() {
   $('.table-wrap').hidden = sets;
 
   $('#itemsTable').className = 'v-' + view;
-  if (sets) renderSetGrid();
+  if (sets) renderSetsView();
   else if (view === 'grading') renderGrading();
   else renderList(view === 'collection' ? coll : wish);
 }
@@ -659,7 +661,7 @@ async function searchCards() {
   try {
     let cards;
     if (q) {
-      cards = await getJSON(`${API}/cards?name=${encodeURIComponent(q)}`);
+      cards = (await getJSON(`${API}/cards?name=${encodeURIComponent(q)}`)).filter(c => !isPocket(setIdOf(c.id)));
       if (setId) cards = cards.filter(c => setIdOf(c.id) === setId);
     } else {
       cards = (await getJSON(`${API}/sets/${encodeURIComponent(setId)}`)).cards || [];
@@ -1244,13 +1246,14 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
 }
-
 // =====================================================================
-// Sets checklist
+// Sets: browse every set by era, open one to see its cards with prices
 // =====================================================================
-const BROWSE_KEY = 'shelf-value-browse-set';
-let browseSetId = localStorage.getItem(BROWSE_KEY) || '';
+const ERAS_KEY = 'shelf-value-eras-v2';
+const SET_PRICES_KEY = 'shelf-value-setprices-';
+let browseSetId = '';          // '' = the list of all sets
 let setMode = 'all';
+let eras = [];                 // [{ id, name, sets: [{ id, name, logo, official, total }] }] newest first
 const setCache = new Map();
 
 async function getSet(id) {
@@ -1258,10 +1261,27 @@ async function getSet(id) {
   return setCache.get(id);
 }
 
-function fillBrowseSets() {
-  $('#browseSet').innerHTML = '<option value="">Choose a set…</option>' + [...sets].reverse()
-    .map(s => `<option value="${esc(s.id)}" ${s.id === browseSetId ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
+async function loadEras() {
+  const cached = readJSON(ERAS_KEY, null);
+  if (cached && Date.now() - cached.t < 3 * 864e5) { eras = cached.data; return; }
+  try {
+    // Skip Pokémon TCG Pocket: it's the phone game, not physical cards.
+    const list = (await getJSON(`${API}/series`)).filter(s => s.id !== 'tcgp');
+    const details = await Promise.all(list.map(s => getJSON(`${API}/series/${encodeURIComponent(s.id)}`).catch(() => null)));
+    eras = details.filter(Boolean).map(d => ({
+      id: d.id, name: d.name, release: d.releaseDate || '',
+      sets: (d.sets || []).map(s => ({ id: s.id, name: s.name, logo: s.logo || '', official: s.cardCount?.official, total: s.cardCount?.total })),
+    })).filter(e => e.sets.length)
+      .sort((a, b) => (b.release || '').localeCompare(a.release || ''));
+    localStorage.setItem(ERAS_KEY, JSON.stringify({ t: Date.now(), data: eras }));
+  } catch {
+    // Fall back to one flat list from the sets we already have.
+    eras = cached?.data || [{ id: 'all', name: 'All sets', sets: [...sets].reverse().map(s => ({ id: s.id, name: s.name, official: s.official })) }];
+  }
 }
+
+// Kept for the code that runs at start-up.
+function fillBrowseSets() { if (view === 'sets') renderSetsView(); }
 
 // What you have of each card: collection quantity and whether it's wishlisted.
 function holdings() {
@@ -1276,15 +1296,110 @@ function holdings() {
   return m;
 }
 
+function renderSetsView() {
+  $('#setList').hidden = !!browseSetId;
+  $('#setDetail').hidden = !browseSetId;
+  if (browseSetId) renderSetGrid(); else renderSetList();
+}
+
+async function renderSetList() {
+  const body = $('#setListBody');
+  if (!eras.length) { body.innerHTML = '<p class="empty">Loading sets…</p>'; await loadEras(); }
+  const q = $('#setSearch').value.trim().toLowerCase();
+  const mineOnly = $('#setMineOnly').checked;
+  // How many different cards you own per set
+  const ownedPerSet = new Map();
+  holdings().forEach((h, cardId) => { if (h.qty) { const s = setIdOf(cardId); ownedPerSet.set(s, (ownedPerSet.get(s) || 0) + 1); } });
+  const html = eras.map(e => {
+    const list = [...e.sets].reverse().filter(s =>
+      (!q || s.name.toLowerCase().includes(q) || e.name.toLowerCase().includes(q) || s.id.toLowerCase() === q) &&
+      (!mineOnly || ownedPerSet.get(s.id)));
+    if (!list.length) return '';
+    return `<div class="era"><h3>${esc(e.name)}</h3><span class="muted small">${list.length} set${list.length > 1 ? 's' : ''}</span></div>
+      <div class="set-cards">${list.map(s => {
+        const own = ownedPerSet.get(s.id) || 0, tot = s.total || s.official || 0;
+        return `<button class="set-card" data-set="${esc(s.id)}">
+          ${s.logo ? `<img src="${esc(s.logo)}.webp" alt="" loading="lazy">` : '<span class="nologo">no logo</span>'}
+          <span><b>${esc(s.name)}</b><small>${tot ? `${tot} cards` : ''}${own ? ` · ${own} owned` : ''}</small>
+          ${own && tot ? `<div class="mini"><span style="width:${Math.min(100, own / tot * 100)}%"></span></div>` : ''}</span>
+        </button>`;
+      }).join('')}</div>`;
+  }).join('');
+  body.innerHTML = html || `<p class="empty">${mineOnly ? 'You don\'t own cards from any matching set yet.' : 'No sets match that search.'}</p>`;
+}
+
+$('#setSearch').addEventListener('input', () => renderSetList());
+$('#setMineOnly').addEventListener('change', () => renderSetList());
+$('#setListBody').addEventListener('click', e => {
+  const b = e.target.closest('[data-set]');
+  if (!b) return;
+  openSet(b.dataset.set);
+});
+$('#setBack').addEventListener('click', () => {
+  browseSetId = '';
+  renderSetsView();
+  $('#viewTabs').scrollIntoView({ block: 'start' });
+});
+
+function openSet(id) {
+  browseSetId = id;
+  setMode = 'all';
+  $('#setCardSearch').value = '';
+  $('#setGrid').innerHTML = '';
+  renderSetsView();
+  $('#viewTabs').scrollIntoView({ block: 'start' });
+  loadSetPrices(id);
+}
+
+// ---- prices for every card in a set (cached for a day) ----
+const setPrices = new Map(); // setId -> { t, prices: { cardId: { p, r } } }
+let pricesLoading = null;
+
+async function loadSetPrices(id) {
+  let entry = setPrices.get(id) || readJSON(SET_PRICES_KEY + id, null);
+  if (entry && Date.now() - entry.t < 864e5) { setPrices.set(id, entry); renderSetGrid(); return; }
+  if (pricesLoading === id) return;
+  pricesLoading = id;
+  entry = { t: Date.now(), prices: entry?.prices || {} };
+  setPrices.set(id, entry);
+  let set;
+  try { set = await getSet(id); } catch { pricesLoading = null; return; }
+  const queue = [...(set.cards || [])];
+  let done = 0;
+  const status = $('#setPriceStatus');
+  async function worker() {
+    while (queue.length) {
+      const c = queue.shift();
+      try {
+        const card = await getCard(c.id);
+        const opt = priceOptions(card)[0];
+        entry.prices[c.id] = { p: opt ? opt.price : null, r: card.rarity || '' };
+      } catch { /* skip */ }
+      done++;
+      if (browseSetId === id) {
+        status.textContent = `Loading prices… ${done} / ${set.cards.length}`;
+        if (done % 25 === 0) renderSetGrid();
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, worker));
+  try { localStorage.setItem(SET_PRICES_KEY + id, JSON.stringify(entry)); } catch { /* storage full: keep in memory */ }
+  pricesLoading = null;
+  if (browseSetId === id) { status.textContent = ''; renderSetGrid(); }
+}
+
+// Rarest last; compared in lowercase because the database mixes capitalisation.
+const RARITY_ORDER = ['common', 'uncommon', 'rare', 'holo rare', 'rare holo', 'shiny rare', 'double rare', 'holo rare v',
+  'rare holo v', 'holo rare vmax', 'rare holo vmax', 'holo rare vstar', 'rare holo vstar', 'ace spec rare', 'radiant rare',
+  'amazing rare', 'ultra rare', 'shiny ultra rare', 'illustration rare', 'rare rainbow', 'secret rare', 'rare secret',
+  'special illustration rare', 'hyper rare', 'mega hyper rare'];
+const rarityRank = r => { const i = RARITY_ORDER.indexOf(String(r || '').toLowerCase()); return i < 0 ? (r ? 8 : -1) : i; };
+
 let setRenderToken = 0;
 async function renderSetGrid() {
+  if (!browseSetId) return;
   const grid = $('#setGrid'), prog = $('#setProgress');
   $$('#setChips button').forEach(b => b.classList.toggle('on', b.dataset.f === setMode));
-  if (!browseSetId) {
-    prog.innerHTML = '';
-    grid.innerHTML = '<p class="note">Pick a set above to see every card in it and check off what you own.</p>';
-    return;
-  }
   const token = ++setRenderToken;
   if (!grid.querySelector('.tile')) grid.innerHTML = '<p class="note">Loading set…</p>';
   let set;
@@ -1292,43 +1407,63 @@ async function renderSetGrid() {
   catch (err) { grid.innerHTML = `<p class="note">Couldn't load this set (${esc(err.message)}).</p>`; return; }
   if (token !== setRenderToken) return;
 
+  $('#setLogo').hidden = !set.logo;
+  if (set.logo) $('#setLogo').src = set.logo + '.webp';
+  $('#setTitle').textContent = set.name;
+  $('#setSub').textContent = [set.serie?.name, set.releaseDate && `Released ${fmtDate(set.releaseDate)}`,
+    `${set.cardCount?.official || ''} cards${set.cardCount?.total > set.cardCount?.official ? ` + ${set.cardCount.total - set.cardCount.official} secret` : ''}`]
+    .filter(Boolean).join(' · ');
+
   const have = holdings();
   const cards = set.cards || [];
+  const priceInfo = setPrices.get(browseSetId)?.prices || {};
   const ownedCount = cards.filter(c => have.get(c.id)?.qty).length;
   const wishCount = cards.filter(c => have.get(c.id)?.wish).length;
   const value = items.filter(it => it.list === 'collection' && it.cardId && setIdOf(it.cardId) === browseSetId)
     .reduce((a, it) => a + itemStats(it).value, 0);
+  const setTotal = cards.reduce((a, c) => a + (priceInfo[c.id]?.p || 0), 0);
   const pctOwned = cards.length ? ownedCount / cards.length * 100 : 0;
   prog.innerHTML = `<b>${ownedCount} / ${cards.length}</b> owned (${pctOwned.toFixed(0)}%)
     <div class="meter"><span style="width:${pctOwned}%"></span></div>
-    <span class="muted">${wishCount} on wishlist · worth ${money(value)}</span>`;
+    <span class="muted">${wishCount} on wishlist · yours worth ${money(value)}${setTotal ? ` · full set ≈ ${money(setTotal)}` : ''}</span>`;
 
+  const q = $('#setCardSearch').value.trim().toLowerCase();
   const shown = cards.filter(c => {
     const h = have.get(c.id);
-    return setMode === 'all' || (setMode === 'owned' && h?.qty) || (setMode === 'missing' && !h?.qty) || (setMode === 'wish' && h?.wish);
+    return (setMode === 'all' || (setMode === 'owned' && h?.qty) || (setMode === 'missing' && !h?.qty) || (setMode === 'wish' && h?.wish)) &&
+      (!q || c.name.toLowerCase().includes(q) || c.localId.toLowerCase() === q.replace(/^#/, ''));
   });
+  const price = c => priceInfo[c.id]?.p;
+  const sort = $('#setSort').value;
+  const byNum = (a, b) => (parseInt(a.localId, 10) || 0) - (parseInt(b.localId, 10) || 0) || a.localId.localeCompare(b.localId);
+  shown.sort({
+    num: byNum,
+    'price-desc': (a, b) => (price(b) ?? -1) - (price(a) ?? -1) || byNum(a, b),
+    'price-asc': (a, b) => (price(a) ?? Infinity) - (price(b) ?? Infinity) || byNum(a, b),
+    name: (a, b) => a.name.localeCompare(b.name) || byNum(a, b),
+    rarity: (a, b) => rarityRank(priceInfo[b.id]?.r) - rarityRank(priceInfo[a.id]?.r) || byNum(a, b),
+  }[sort]);
+
   grid.innerHTML = shown.length ? shown.map(c => {
     const h = have.get(c.id);
     const state = h?.qty ? 'owned' : h?.wish ? 'wish' : 'missing';
     const mark = state === 'owned' ? '✓' : state === 'wish' ? '♥' : '';
+    const p = price(c), r = priceInfo[c.id]?.r;
     return `<div class="tile ${state}" data-card="${esc(c.id)}">
       ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy">` : '<div class="ph">no image</div>'}
       ${h?.qty > 1 ? `<span class="qty-badge">×${h.qty}</span>` : ''}
       <button class="mark" aria-label="Add ${esc(c.name)}">${mark}</button>
-      <b>${esc(c.name)}</b><span>#${esc(c.localId)}</span></div>`;
-  }).join('') : `<p class="note">${{ owned: 'You don\'t own any cards from this set yet.', missing: 'You have every card in this set! 🎉', wish: 'No cards from this set on your wishlist.' }[setMode] || ''}</p>`;
+      <b>${esc(c.name)}</b><span>#${esc(c.localId)}${r ? ` · ${esc(r)}` : ''}</span>
+      <span class="price">${p != null ? money(p) : (c.id in priceInfo ? '—' : '')}</span></div>`;
+  }).join('') : `<p class="note">${{ owned: 'You don\'t own any cards from this set yet.', missing: 'You have every card in this set! 🎉', wish: 'No cards from this set on your wishlist.' }[setMode] || 'No cards match that search.'}</p>`;
 }
 
-$('#browseSet').addEventListener('change', e => {
-  browseSetId = e.target.value;
-  localStorage.setItem(BROWSE_KEY, browseSetId);
-  $('#setGrid').innerHTML = '';
-  renderSetGrid();
-});
 $('#setChips').addEventListener('click', e => {
   const b = e.target.closest('[data-f]');
   if (b) { setMode = b.dataset.f; renderSetGrid(); }
 });
+$('#setSort').addEventListener('change', () => renderSetGrid());
+$('#setCardSearch').addEventListener('input', () => renderSetGrid());
 
 // The box on each card: choose collection or wishlist.
 const pickDialog = $('#pickDialog');
@@ -1415,7 +1550,7 @@ async function getOcr() {
 }
 
 // Shrink the photo, make it grayscale and boost contrast so small print reads better.
-async function prepImage(bmp, crop = null, scale = 1, angle = 0) {
+async function prepImage(bmp, crop = null, scale = 1, angle = 0, bin = false) {
   const sx = crop ? crop.x * bmp.width : 0, sy = crop ? crop.y * bmp.height : 0;
   const sw = crop ? crop.w * bmp.width : bmp.width, sh = crop ? crop.h * bmp.height : bmp.height;
   const k = Math.min(1, 1800 / Math.max(sw, sh)) * scale;
@@ -1436,6 +1571,21 @@ async function prepImage(bmp, crop = null, scale = 1, angle = 0) {
   }
   const span = Math.max(1, hi - lo);
   for (let i = 0; i < d.length; i += 4) { const v = (d[i] - lo) * 255 / span; d[i] = d[i + 1] = d[i + 2] = v; }
+  if (bin) {
+    // Local (adaptive) threshold: each pixel vs the average around it. Beats uneven glare and foil shine.
+    const W = c.width, H = c.height, r = Math.max(8, Math.round(Math.min(W, H) / 12));
+    const sum = new Float64Array((W + 1) * (H + 1));
+    for (let y = 0; y < H; y++) {
+      let row = 0;
+      for (let x = 0; x < W; x++) { row += d[(y * W + x) * 4]; sum[(y + 1) * (W + 1) + x + 1] = sum[y * (W + 1) + x + 1] + row; }
+    }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(W, x + r + 1), y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+      const mean = (sum[y1 * (W + 1) + x1] - sum[y0 * (W + 1) + x1] - sum[y1 * (W + 1) + x0] + sum[y0 * (W + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+      const i = (y * W + x) * 4, v = d[i] < mean - 12 ? 0 : 255;
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+  }
   g.putImageData(img, 0, 0);
   return c;
 }
@@ -1459,59 +1609,105 @@ const plausibleNumber = text => findNumbers(text).some(n =>
 const nameWords = n => n.toLowerCase().replace(/[^a-z0-9' ]/g, ' ').split(/\s+/)
   .filter(w => w.length >= 3 && !['vmax', 'vstar', 'gx'].includes(w));
 
+// Small edit distance, for names the text reader gets slightly wrong ("Clobbop us", "Cl0bbopus").
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, cur[j]);
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+const SKIP_WORDS = /^(basic|stage|evolves|from|weakness|resistance|retreat|pokemon|pokémon|illus|ability|trainer|energy|damage|attach|discard|opponent|this|your|turn|each|card|cards|that|then|does|more|have|with|into|until|during|pokemon's)$/i;
+
+// Match what was read to real cards. Every candidate is checked two ways — the printed number
+// AND the card name — so a misread number (shiny reverse holos!) can't beat a name that clearly matches.
 async function matchScan(text, nameText = '') {
-  const lower = text.toLowerCase();
-  const scoreName = name => nameWords(name).reduce((a, w) => a + (lower.includes(w) ? w.length : 0), 0);
-  const found = [];
+  const all = nameText + '\n' + text;
+  const tokens = [...new Set((all.toLowerCase().replace(/0/g, 'o').match(/[a-zé][a-zé'’]{2,}/g) || []))];
+  const hitCache = new Map();
+  const wordHit = w => {
+    if (!hitCache.has(w)) {
+      const max = w.length >= 7 ? 2 : w.length >= 4 ? 1 : 0;
+      hitCache.set(w, tokens.includes(w) ? 1 : tokens.some(t => editDistance(t, w, max) <= max) ? 0.8 : 0);
+    }
+    return hitCache.get(w);
+  };
+  const nameScore = name => nameWords(name).reduce((a, w) => a + w.length * wordHit(w.replace(/0/g, 'o')), 0);
+  const digits = new Set((text.match(/\d{1,3}/g) || []).map(d => String(parseInt(d, 10))));
+  // Partly-read numbers ("12" for 112) still count for something.
+  const readLocals = findNumbers(text).map(n => String(parseInt(n.local.replace(/\D/g, ''), 10))).filter(l => l.length >= 2);
+  const nearNumber = localId => { const v = String(parseInt(localId, 10)); return readLocals.some(l => v.includes(l) || l.includes(v)) ? 2 : 0; };
+  const byId = new Map();
+  const add = (card, setName, numScore) => {
+    const ns = nameScore(card.name);
+    const score = numScore + ns * 1.5;
+    const prev = byId.get(card.id);
+    if (!prev || prev.score < score) byId.set(card.id, { ...card, setName, score, nameOk: ns >= 4, numOk: numScore >= 7 });
+  };
+
+  // 1) By number: sets with that many cards, then the card at that number — and any card in those sets whose name was read.
   for (const { local, total } of findNumbers(text)) {
     const totalNum = parseInt(total.replace(/\D/g, ''), 10);
     const prefix = total.replace(/\d/g, '');
-    // Sets with that many cards (newest first); Trainer Gallery etc. have their own sub-sets.
     const cand = sets.filter(s => prefix ? true : s.official === totalNum).reverse().slice(0, prefix ? 40 : 15);
     const lists = await Promise.all(cand.map(s => getSet(s.id).catch(() => null)));
     lists.forEach(set => {
       if (!set) return;
       if (prefix && !(set.cards || []).some(c => normId(c.localId).startsWith(prefix))) return;
-      const card = (set.cards || []).find(c => normId(c.localId) === normId(local));
-      if (card && !found.some(f => f.id === card.id)) found.push({ ...card, setName: set.name, score: 5 + scoreName(card.name) });
+      (set.cards || []).forEach(c => {
+        if (normId(c.localId) === normId(local)) add(c, set.name, 7);
+        else if (nameScore(c.name) >= 4) add(c, set.name, 2 + (digits.has(String(parseInt(c.localId, 10))) ? 3 : nearNumber(c.localId)));
+      });
     });
   }
-  if (found.length) return found.sort((a, b) => b.score - a.score);
 
-  // No readable number: try the most name-like words, starting with the top of the card where the name is.
-  const words = [...new Set(((nameText + '\n' + text).match(/[A-Za-z][A-Za-z'’.-]{3,}/g) || []).map(w => w.replace(/[’.]/g, '')))]
-    .filter(w => w.length >= 5 || /^[A-Z][a-z]+$/.test(w))
-    .filter(w => !/^(basic|stage|evolves|from|weakness|resistance|retreat|pokemon|pokémon|illus|ability|trainer|energy|damage|attach|discard|opponent|this|your|turn)$/i.test(w))
-    .slice(0, 5);
-  for (const w of words) {
-    const cards = await getJSON(`${API}/cards?name=${encodeURIComponent(w)}`).catch(() => []);
-    if (cards.length && cards.length < 300) {
+  // 2) By name, if nothing so far has a matching name: search the card's name and use number fragments to pick the printing.
+  const top = [...byId.values()].sort((a, b) => b.score - a.score)[0];
+  if (!top || !top.nameOk) {
+    const words = [...new Set((all.match(/[A-Za-z][A-Za-z'’.-]{3,}/g) || []).map(w => w.replace(/[’.]/g, '')))]
+      .filter(w => (w.length >= 5 || /^[A-Z][a-z]+$/.test(w)) && !SKIP_WORDS.test(w))
+      .slice(0, 6);
+    for (const w of words) {
+      const cards = (await getJSON(`${API}/cards?name=${encodeURIComponent(w)}`).catch(() => [])).filter(c => !isPocket(setIdOf(c.id)));
+      if (!cards.length || cards.length >= 300) continue;
       $('#cardQuery').value = w;
-      // Use any number fragments that were read (e.g. "006" or "165") to rank the right printing first.
-      const digits = new Set((text.match(/\d{1,3}/g) || []).map(d => String(parseInt(d, 10))));
-      return cards.map(c => {
+      cards.forEach(c => {
         const s = setById.get(setIdOf(c.id));
-        const score = (digits.has(String(parseInt(c.localId, 10))) ? 4 : 0) + (s?.official && digits.has(String(s.official)) ? 3 : 0)
-          + (c.name.toLowerCase() === w.toLowerCase() ? 1 : 0);
-        return { ...c, setName: s?.name || setIdOf(c.id), score: score >= 7 ? score + 5 : score };
-      }).sort((a, b) => b.score - a.score || (setOrder.get(setIdOf(b.id)) ?? -1) - (setOrder.get(setIdOf(a.id)) ?? -1)).slice(0, 60);
+        const num = (digits.has(String(parseInt(c.localId, 10))) ? 4 : nearNumber(c.localId)) + (s?.official && digits.has(String(s.official)) ? 3 : 0);
+        add(c, s?.name || setIdOf(c.id), num);
+      });
+      break;
     }
   }
-  return [];
+
+  return [...byId.values()]
+    .sort((a, b) => b.score - a.score || (setOrder.get(setIdOf(b.id)) ?? -1) - (setOrder.get(setIdOf(a.id)) ?? -1))
+    .slice(0, 60)
+    .map((c, i, arr) => ({ ...c, best: i === 0 && c.nameOk && (c.numOk || c.score >= 14) && (arr.length === 1 || c.score - arr[1].score >= 3) }));
 }
 
-function showScanResults(cards, note, warn = '') {
+function showScanResults(cards, note, warn = '', again = true) {
   const box = $('#results');
-  box.innerHTML = cards.map((c, i) => `<button type="button" class="result ${i === 0 && (c.score > 5 || cards.length === 1) ? 'best' : ''}" data-card="${esc(c.id)}">
+  box.innerHTML = cards.map(c => `<button type="button" class="result ${c.best ? 'best' : ''}" data-card="${esc(c.id)}">
       ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy">` : '<div class="ph">no image</div>'}
       <b>${esc(c.name)}</b><span>${esc(c.setName)} · #${esc(c.localId)}</span></button>`).join('');
-  setScanStatus(note, warn);
+  setScanStatus(note, warn, again);
 }
 
-function setScanStatus(msg, warn = '') {
+function setScanStatus(msg, warn = '', again = false) {
   const s = $('#scanStatus');
   s.hidden = false;
-  s.innerHTML = esc(msg) + (warn ? `<br><span class="scan-warn">⚠ ${esc(warn)}</span>` : '');
+  s.innerHTML = esc(msg) + (warn ? `<br><span class="scan-warn">⚠ ${esc(warn)}</span>` : '')
+    + (again ? ' <button type="button" id="scanAgain" class="small-btn">&#128247; Scan again</button>' : '');
 }
 
 // How crooked the printed text came out: tilted cards give sloped text lines,
@@ -1537,8 +1733,8 @@ async function scanImage(bmp, { cropped = false, tiltAtCapture = null } = {}) {
     setScanStatus(ocrWorker ? 'Reading the card…' : 'Getting the text reader ready (first time only, a few seconds)…');
     const worker = await getOcr();
     let tilt = null;
-    const read = async (crop, scale, angle, withLines = false) => {
-      const res = await worker.recognize(await prepImage(bmp, crop, scale, angle), {}, withLines ? { text: true, blocks: true } : { text: true });
+    const read = async (crop, scale, angle, withLines = false, bin = false) => {
+      const res = await worker.recognize(await prepImage(bmp, crop, scale, angle, bin), {}, withLines ? { text: true, blocks: true } : { text: true });
       if (withLines) tilt = textTilt(res.data);
       return res.data.text;
     };
@@ -1546,23 +1742,28 @@ async function scanImage(bmp, { cropped = false, tiltAtCapture = null } = {}) {
     const passes = cropped ? [
       [null, 1, 0, true],
       [{ x: 0, y: 0.86, w: 1, h: 0.14 }, 2.5, 0],
+      [{ x: 0, y: 0.86, w: 1, h: 0.14 }, 2.5, 0, false, true], // glare-resistant
       [{ x: 0, y: 0.72, w: 1, h: 0.28 }, 2, 0],
       [{ x: 0, y: 0.72, w: 1, h: 0.28 }, 2, 4],
       [{ x: 0, y: 0.72, w: 1, h: 0.28 }, 2, -4],
     ] : [
       [null, 1, 0, true],
       [{ x: 0, y: 0.80, w: 1, h: 0.20 }, 2, 0],
+      [{ x: 0, y: 0.80, w: 1, h: 0.20 }, 2, 0, false, true], // glare-resistant
       [{ x: 0, y: 0.45, w: 1, h: 0.55 }, 1.6, 0],
       [{ x: 0, y: 0.45, w: 1, h: 0.55 }, 1.6, 5],
       [{ x: 0, y: 0.45, w: 1, h: 0.55 }, 1.6, -5],
     ];
+    // Read the name area too (top of the card) — used to double-check the number.
+    const namePass = [{ x: 0, y: 0, w: 1, h: cropped ? 0.16 : 0.3 }, 1.6, 0];
     let text = '';
     for (let i = 0; i < passes.length; i++) {
       setScanStatus(`Reading the card… (${i + 1}/${passes.length})`);
       text += '\n' + await read(...passes[i]);
-      if (plausibleNumber(text)) break;
+      // Stop early only when the number points at a real card and that card's name was read too.
+      if (plausibleNumber(text) && (await matchScan(text)).some(m => m.best)) break;
     }
-    const nameText = plausibleNumber(text) ? '' : await read({ x: 0, y: 0, w: 1, h: cropped ? 0.16 : 0.3 }, 1.6, 0);
+    const nameText = await read(...namePass) + '\n' + await read(...namePass.slice(0, 3), false, true);
 
     // Flatness warning: from the phone's tilt sensor at capture, or from crooked text in the photo.
     let warn = '';
@@ -1572,13 +1773,17 @@ async function scanImage(bmp, { cropped = false, tiltAtCapture = null } = {}) {
     setScanStatus('Looking up the card…');
     const matches = await matchScan(text, nameText);
     if (!matches.length) {
-      setScanStatus("Couldn't read this card. Try again with the card filling the frame, flat and without glare — or type the name above.", warn);
+      setScanStatus("Couldn't read this card. Try again with the card filling the frame, flat and without glare — or type the name above.", warn, true);
       return;
     }
-    const n = findNumbers(text)[0];
-    showScanResults(matches, n
-      ? `Read card number ${n.local}/${n.total}. Tap the right card to continue.`
-      : `Couldn't read the card number, so here are cards named "${$('#cardQuery').value}". Tap the right one.`, warn);
+    const best = matches[0];
+    const n = findNumbers(text).find(x => normId(x.local) === normId(best.localId)) || findNumbers(text)[0];
+    const note = best.best
+      ? `Found it: ${best.name} #${best.localId}. Tap it to continue.`
+      : n
+        ? `Not sure about this one — the number read as ${n.local}/${n.total}. Check the card below is right, or scan again.`
+        : `Not sure about this one — couldn't read the card number. Pick the right "${$('#cardQuery').value}" below, or scan again.`;
+    showScanResults(matches, note, warn || (best.best ? '' : 'Shiny cards (reverse holos especially) are harder to read — tilt the card slightly away from the light to cut the glare.'));
   } catch (err) {
     setScanStatus('Scan failed: ' + err.message);
   }
@@ -1680,7 +1885,8 @@ $('#camShutter').addEventListener('click', async () => {
   }
 });
 
-$$('.scanBtn').forEach(b => b.addEventListener('click', () => {
+$$('.scanBtn').forEach(b => b.addEventListener('click', startScan));
+function startScan() {
   if (!itemDialog.open) openItemForm(null, view === 'wishlist' ? 'wishlist' : 'collection');
   formKind = 'card'; picked = null; pickedOpts = []; syncForm();
   $('#results').innerHTML = '';
@@ -1693,8 +1899,11 @@ $$('.scanBtn').forEach(b => b.addEventListener('click', () => {
   } else {
     $('#scanInput').click(); // must happen right away so the phone allows it
   }
-}));
-$('#scanStatus').addEventListener('click', e => { if (e.target.id === 'scanPick') $('#scanInput').click(); });
+}
+$('#scanStatus').addEventListener('click', e => {
+  if (e.target.id === 'scanPick') $('#scanInput').click();
+  if (e.target.id === 'scanAgain') startScan();
+});
 
 // =====================================================================
 // Start
@@ -1703,7 +1912,7 @@ render();
 updateRefreshStatus();
 loadSets().then(() => {
   fillBrowseSets();
-  if (view === 'sets') renderSetGrid();
+  if (view === 'sets') renderSetsView();
   const last = +localStorage.getItem(REFRESH_KEY);
   if (items.length && Date.now() - last > 12 * 36e5) refreshAll();
 });

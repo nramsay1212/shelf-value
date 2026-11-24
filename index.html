@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -57,17 +57,41 @@
       </div>
 
       <div id="setsView" hidden>
-        <div class="toolbar">
-          <select id="browseSet" aria-label="Set"><option value="">Choose a set…</option></select>
-          <div class="chips" id="setChips">
-            <button data-f="all" class="on">All</button><button data-f="missing">Missing</button>
-            <button data-f="owned">Owned</button><button data-f="wish">Wishlist</button>
+        <!-- all sets -->
+        <div id="setList">
+          <div class="toolbar">
+            <input id="setSearch" type="search" placeholder="Search sets… (e.g. 151, Surging Sparks, Base)">
+            <label class="check"><input type="checkbox" id="setMineOnly"> Only sets I collect</label>
+            <span class="spacer"></span>
+            <button class="scanBtn">&#128247; Scan a card</button>
           </div>
-          <span class="spacer"></span>
-          <button class="scanBtn">&#128247; Scan a card</button>
+          <div id="setListBody"></div>
         </div>
-        <div id="setProgress" class="set-progress"></div>
-        <div id="setGrid" class="set-grid"></div>
+        <!-- one set -->
+        <div id="setDetail" hidden>
+          <div class="set-head">
+            <button id="setBack">&#8592; All sets</button>
+            <img id="setLogo" alt="">
+            <div class="grow"><h2 id="setTitle"></h2><p id="setSub" class="muted small"></p></div>
+          </div>
+          <div id="setProgress" class="set-progress"></div>
+          <div class="toolbar">
+            <input id="setCardSearch" type="search" placeholder="Search this set…">
+            <div class="chips" id="setChips">
+              <button data-f="all" class="on">All</button><button data-f="missing">Missing</button>
+              <button data-f="owned">Owned</button><button data-f="wish">Wishlist</button>
+            </div>
+            <select id="setSort" aria-label="Sort">
+              <option value="num">Card number</option>
+              <option value="price-desc">Price: high to low</option>
+              <option value="price-asc">Price: low to high</option>
+              <option value="name">Name A to Z</option>
+              <option value="rarity">Rarity</option>
+            </select>
+          </div>
+          <p id="setPriceStatus" class="muted small"></p>
+          <div id="setGrid" class="set-grid"></div>
+        </div>
       </div>
 
       <div class="toolbar" id="listToolbar">
@@ -320,7 +344,7 @@
   </dialog>
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.
