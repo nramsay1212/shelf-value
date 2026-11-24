@@ -5,7 +5,7 @@ $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$Port/")
 $listener.Start()
 Write-Host "Serving $root at http://localhost:$Port/ (Ctrl+C to stop)"
-$types = @{ '.html' = 'text/html'; '.css' = 'text/css'; '.js' = 'application/javascript'; '.json' = 'application/json' }
+$types = @{ '.html' = 'text/html'; '.css' = 'text/css'; '.js' = 'application/javascript'; '.json' = 'application/json'; '.webmanifest' = 'application/manifest+json'; '.png' = 'image/png' }
 while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   $path = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath.TrimStart('/'))

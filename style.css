@@ -43,7 +43,8 @@ h3 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); text-transform: u
 
 .top, main { max-width: 1150px; margin: 0 auto; padding: 0 20px; }
 .top { padding-top: 28px; padding-bottom: 18px; }
-main { padding-bottom: 40px; display: grid; gap: 16px; }
+main { padding-bottom: 40px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.card, .stats { min-width: 0; }
 
 .card {
   background: var(--card);
@@ -240,3 +241,32 @@ td.name small, .picked small { display: block; color: var(--muted); font-weight:
 .listings { font-size: 13px; margin: 6px 0 0; padding-left: 18px; }
 .listings a { color: var(--accent); }
 @media (max-width: 600px) { .range-row { grid-template-columns: 70px 1fr; } .range-row .nums { grid-column: 1 / -1; text-align: left; } }
+
+/* installed app: keep content clear of the phone's status bar / notch */
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+@media (max-width: 640px) {
+  .top { padding-top: 18px; }
+  .top h1 { padding-right: 110px; }
+  .settings-btn { top: 16px; right: 14px; padding: 6px 10px; }
+  .top, main { padding-left: 12px; padding-right: 12px; }
+  .big { font-size: 28px; }
+  .hero-side { justify-items: start; width: 100%; }
+  .chart.tall { height: 220px; }
+  .toolbar > * { flex: 1 1 140px; }
+  .toolbar .spacer { display: none; }
+  #search { min-width: 0; flex-basis: 100%; }
+  .views { display: flex; width: 100%; }
+  .views button { flex: 1; padding: 6px 8px; }
+  dialog { padding: 14px; }
+  .detail-title img { width: 80px; }
+}
+@media (max-width: 640px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat .value { font-size: 18px; }
+  /* fewer columns on phones (full details are one tap away) */
+  #itemsTable.v-collection :is(th, td):nth-child(n+3):is(:nth-child(3), :nth-child(4), :nth-child(5), :nth-child(7), :nth-child(9)),
+  #itemsTable.v-wishlist :is(th, td):is(:nth-child(3), :nth-child(6), :nth-child(7)),
+  #itemsTable.v-grading :is(th, td):is(:nth-child(4), :nth-child(5)) { display: none; }
+  th, td { padding: 8px 6px; }
+  td.name { min-width: 0; }
+}

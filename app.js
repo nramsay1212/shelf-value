@@ -410,6 +410,7 @@ function render() {
   $('#sort').hidden = view === 'grading';
   $('#gradingSettings').hidden = view !== 'grading';
 
+  $('#itemsTable').className = 'v-' + view;
   if (view === 'grading') renderGrading();
   else renderList(view === 'collection' ? coll : wish);
 }
