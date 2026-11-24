@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -52,7 +52,22 @@
       <div class="tabs views" id="viewTabs">
         <button data-view="collection" class="on">Collection</button>
         <button data-view="wishlist">Wishlist</button>
-        <button data-view="grading">Grading picks</button>
+        <button data-view="sets">Sets</button>
+        <button data-view="grading">Grading</button>
+      </div>
+
+      <div id="setsView" hidden>
+        <div class="toolbar">
+          <select id="browseSet" aria-label="Set"><option value="">Choose a set…</option></select>
+          <div class="chips" id="setChips">
+            <button data-f="all" class="on">All</button><button data-f="missing">Missing</button>
+            <button data-f="owned">Owned</button><button data-f="wish">Wishlist</button>
+          </div>
+          <span class="spacer"></span>
+          <button class="scanBtn">&#128247; Scan a card</button>
+        </div>
+        <div id="setProgress" class="set-progress"></div>
+        <div id="setGrid" class="set-grid"></div>
       </div>
 
       <div class="toolbar" id="listToolbar">
@@ -74,6 +89,7 @@
           <option value="added-desc">Recently added</option>
         </select>
         <span class="spacer"></span>
+        <button class="scanBtn">&#128247; Scan</button>
         <button id="addBtn" class="primary">+ Add</button>
         <div class="menu">
           <button id="dataBtn">Data &#9662;</button>
@@ -134,7 +150,9 @@
           <label class="grow">Card name <input id="cardQuery" placeholder="e.g. Charizard, Pikachu ex, Umbreon VMAX"></label>
           <label>Set <select id="setSelect"><option value="">Any set</option></select></label>
           <button type="button" id="searchBtn" class="primary">Search</button>
+          <button type="button" class="scanBtn">&#128247; Scan</button>
         </div>
+        <p id="scanStatus" class="muted small" hidden></p>
         <div id="results" class="results"></div>
       </div>
 
@@ -244,6 +262,41 @@
     </table>
   </dialog>
 
+  <!-- Checklist: choose collection or wishlist -->
+  <dialog id="pickDialog" class="pick">
+    <div class="pick-head">
+      <img id="pkImg" alt="">
+      <div>
+        <h2 id="pkName"></h2>
+        <p id="pkMeta" class="sub"></p>
+        <p id="pkHave" class="sub"></p>
+      </div>
+    </div>
+    <div class="pick-actions">
+      <button id="pkCollection" class="primary">&#10003; Add to collection…</button>
+      <button id="pkWishlist">&#9825; Add to wishlist</button>
+      <button id="pkView" hidden>View in my collection</button>
+      <button data-close>Cancel</button>
+    </div>
+  </dialog>
+
+  <input id="scanInput" type="file" accept="image/*" capture="environment" hidden>
+
+  <!-- In-app camera with a card frame and a flatness level -->
+  <dialog id="camView" class="cam">
+    <video id="camVideo" playsinline muted autoplay></video>
+    <div class="cam-shade"></div>
+    <div id="camGuide" class="cam-guide"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span></div>
+    <div id="camLevel" class="cam-level" hidden><div id="camBubble" class="bubble"></div></div>
+    <p id="camMsg" class="cam-msg">Line the card up inside the frame</p>
+    <div class="cam-actions">
+      <button id="camCancel" class="cam-btn">Cancel</button>
+      <button id="camShutter" class="shutter" aria-label="Scan card"></button>
+      <button id="camUpload" class="cam-btn">&#128193; Photo</button>
+    </div>
+  </dialog>
+  <div id="toast" class="toast" hidden></div>
+
   <!-- Settings -->
   <dialog id="settingsDialog">
     <form id="settingsForm">
@@ -267,7 +320,7 @@
   </dialog>
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.

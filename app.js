@@ -144,7 +144,10 @@ function priceOptions(card) {
       opts.push({ key: `${v.variantId}~${key}`, label, price: p.marketPrice ?? p.midPrice, productId: p.productId });
     });
   });
-  return opts;
+  // Regular versions first (they're what most people have), reverse holos and specials after.
+  const rank = k => /^normal$/.test(k) ? 0 : /^holofoil$/.test(k) ? 1 : /^unlimited/.test(k) ? 2
+    : /^1st-edition/.test(k) ? 3 : /reverse/.test(k) ? 5 : 4;
+  return opts.sort((a, b) => rank(a.key) - rank(b.key));
 }
 
 // =====================================================================
@@ -410,7 +413,7 @@ function render() {
     statTile('Worth grading', picks ? `${picks} card${picks > 1 ? 's' : ''}` : '—');
 
   // view tabs with counts
-  const counts = { collection: coll.length, wishlist: wish.length, grading: gradingCandidates().length };
+  const counts = { collection: coll.length, wishlist: wish.length, grading: gradingCandidates().length, sets: '' };
   $$('#viewTabs button').forEach(b => {
     b.classList.toggle('on', b.dataset.view === view);
     b.innerHTML = b.textContent.replace(/\s*\d+$/, '') + `<span class="count">${counts[b.dataset.view]}</span>`;
@@ -425,9 +428,14 @@ function render() {
   $('#typeFilter').hidden = view === 'grading';
   $('#sort').hidden = view === 'grading';
   $('#gradingSettings').hidden = view !== 'grading';
+  const sets = view === 'sets';
+  $('#setsView').hidden = !sets;
+  $('#listToolbar').hidden = sets;
+  $('.table-wrap').hidden = sets;
 
   $('#itemsTable').className = 'v-' + view;
-  if (view === 'grading') renderGrading();
+  if (sets) renderSetGrid();
+  else if (view === 'grading') renderGrading();
   else renderList(view === 'collection' ? coll : wish);
 }
 
@@ -625,9 +633,9 @@ async function openItemForm(id = null, list = view === 'wishlist' ? 'wishlist' :
   } else {
     f.acquired.value = today();
   }
+  $('#scanStatus').hidden = true;
   syncForm();
-  itemDialog.showModal();
-  if (!it) $('#cardQuery').focus();
+  if (!itemDialog.open) itemDialog.showModal();
 }
 
 $('#listTabs').addEventListener('click', e => {
@@ -674,22 +682,38 @@ $('#searchBtn').addEventListener('click', searchCards);
 $('#cardQuery').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); searchCards(); } });
 $('#setSelect').addEventListener('change', () => { if ($('#setSelect').value) searchCards(); });
 
+// Turn a full card from the database into the fields we store.
+function cardIdentity(card) {
+  const s = setById.get(card.set?.id) || {};
+  const total = card.set?.cardCount?.official || s.official;
+  return {
+    cardId: card.id, name: card.name, setId: card.set?.id, setName: card.set?.name || s.name,
+    number: total ? `${card.localId}/${total}` : card.localId, rarity: card.rarity, image: card.image,
+  };
+}
+
+async function selectCard(cardId) {
+  const card = await getCard(cardId);
+  picked = cardIdentity(card);
+  pickedOpts = priceOptions(card);
+  showPicked();
+  syncForm();
+}
+
+// Open the Add form with a card already chosen (from the set checklist or a scan).
+async function openFormWithCard(cardId, list) {
+  await openItemForm(null, list);
+  $('#scanStatus').hidden = true;
+  try { await selectCard(cardId); }
+  catch (err) { alert("Couldn't load that card: " + err.message); }
+}
+
 $('#results').addEventListener('click', async e => {
   const b = e.target.closest('[data-card]');
   if (!b) return;
   b.disabled = true;
-  try {
-    const card = await getCard(b.dataset.card);
-    const s = setById.get(card.set?.id) || {};
-    const total = card.set?.cardCount?.official || s.official;
-    picked = {
-      cardId: card.id, name: card.name, setId: card.set?.id, setName: card.set?.name || s.name,
-      number: total ? `${card.localId}/${total}` : card.localId, rarity: card.rarity, image: card.image,
-    };
-    pickedOpts = priceOptions(card);
-    showPicked();
-    syncForm();
-  } catch (err) {
+  try { await selectCard(b.dataset.card); $('#scanStatus').hidden = true; }
+  catch (err) {
     b.disabled = false;
     alert("Couldn't load that card: " + err.message);
   }
@@ -745,7 +769,13 @@ itemForm.addEventListener('submit', e => {
   }
   save();
   itemDialog.close();
-  if (it.list !== view && view !== 'grading') view = it.list;
+  // Got a card you wanted? Take it off the wishlist.
+  if (!editingId && it.list === 'collection' && it.cardId) {
+    const wished = items.find(i => i.list === 'wishlist' && i.cardId === it.cardId);
+    if (wished) { items = items.filter(i => i !== wished); save(); toast(`✓ Added ${it.name} and took it off your wishlist`); }
+    else toast(`✓ Added ${it.name} to your collection`);
+  }
+  if (it.list !== view && view !== 'grading' && view !== 'sets') view = it.list;
   render();
   if (detailId) renderDetail();
 });
@@ -1204,11 +1234,476 @@ $('#settingsForm').addEventListener('submit', async e => {
 });
 
 // =====================================================================
+// Toast
+// =====================================================================
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+}
+
+// =====================================================================
+// Sets checklist
+// =====================================================================
+const BROWSE_KEY = 'shelf-value-browse-set';
+let browseSetId = localStorage.getItem(BROWSE_KEY) || '';
+let setMode = 'all';
+const setCache = new Map();
+
+async function getSet(id) {
+  if (!setCache.has(id)) setCache.set(id, getJSON(`${API}/sets/${encodeURIComponent(id)}`).catch(err => { setCache.delete(id); throw err; }));
+  return setCache.get(id);
+}
+
+function fillBrowseSets() {
+  $('#browseSet').innerHTML = '<option value="">Choose a set…</option>' + [...sets].reverse()
+    .map(s => `<option value="${esc(s.id)}" ${s.id === browseSetId ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
+}
+
+// What you have of each card: collection quantity and whether it's wishlisted.
+function holdings() {
+  const m = new Map();
+  items.forEach(it => {
+    if (!it.cardId) return;
+    const h = m.get(it.cardId) || { qty: 0, wish: false, ids: [] };
+    if (it.list === 'collection') { h.qty += it.qty || 1; h.ids.push(it.id); }
+    else h.wish = true;
+    m.set(it.cardId, h);
+  });
+  return m;
+}
+
+let setRenderToken = 0;
+async function renderSetGrid() {
+  const grid = $('#setGrid'), prog = $('#setProgress');
+  $$('#setChips button').forEach(b => b.classList.toggle('on', b.dataset.f === setMode));
+  if (!browseSetId) {
+    prog.innerHTML = '';
+    grid.innerHTML = '<p class="note">Pick a set above to see every card in it and check off what you own.</p>';
+    return;
+  }
+  const token = ++setRenderToken;
+  if (!grid.querySelector('.tile')) grid.innerHTML = '<p class="note">Loading set…</p>';
+  let set;
+  try { set = await getSet(browseSetId); }
+  catch (err) { grid.innerHTML = `<p class="note">Couldn't load this set (${esc(err.message)}).</p>`; return; }
+  if (token !== setRenderToken) return;
+
+  const have = holdings();
+  const cards = set.cards || [];
+  const ownedCount = cards.filter(c => have.get(c.id)?.qty).length;
+  const wishCount = cards.filter(c => have.get(c.id)?.wish).length;
+  const value = items.filter(it => it.list === 'collection' && it.cardId && setIdOf(it.cardId) === browseSetId)
+    .reduce((a, it) => a + itemStats(it).value, 0);
+  const pctOwned = cards.length ? ownedCount / cards.length * 100 : 0;
+  prog.innerHTML = `<b>${ownedCount} / ${cards.length}</b> owned (${pctOwned.toFixed(0)}%)
+    <div class="meter"><span style="width:${pctOwned}%"></span></div>
+    <span class="muted">${wishCount} on wishlist · worth ${money(value)}</span>`;
+
+  const shown = cards.filter(c => {
+    const h = have.get(c.id);
+    return setMode === 'all' || (setMode === 'owned' && h?.qty) || (setMode === 'missing' && !h?.qty) || (setMode === 'wish' && h?.wish);
+  });
+  grid.innerHTML = shown.length ? shown.map(c => {
+    const h = have.get(c.id);
+    const state = h?.qty ? 'owned' : h?.wish ? 'wish' : 'missing';
+    const mark = state === 'owned' ? '✓' : state === 'wish' ? '♥' : '';
+    return `<div class="tile ${state}" data-card="${esc(c.id)}">
+      ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy">` : '<div class="ph">no image</div>'}
+      ${h?.qty > 1 ? `<span class="qty-badge">×${h.qty}</span>` : ''}
+      <button class="mark" aria-label="Add ${esc(c.name)}">${mark}</button>
+      <b>${esc(c.name)}</b><span>#${esc(c.localId)}</span></div>`;
+  }).join('') : `<p class="note">${{ owned: 'You don\'t own any cards from this set yet.', missing: 'You have every card in this set! 🎉', wish: 'No cards from this set on your wishlist.' }[setMode] || ''}</p>`;
+}
+
+$('#browseSet').addEventListener('change', e => {
+  browseSetId = e.target.value;
+  localStorage.setItem(BROWSE_KEY, browseSetId);
+  $('#setGrid').innerHTML = '';
+  renderSetGrid();
+});
+$('#setChips').addEventListener('click', e => {
+  const b = e.target.closest('[data-f]');
+  if (b) { setMode = b.dataset.f; renderSetGrid(); }
+});
+
+// The box on each card: choose collection or wishlist.
+const pickDialog = $('#pickDialog');
+let pickCardId = null;
+
+$('#setGrid').addEventListener('click', e => {
+  const tile = e.target.closest('.tile[data-card]');
+  if (tile) openPick(tile.dataset.card);
+});
+
+async function openPick(cardId) {
+  pickCardId = cardId;
+  const set = await getSet(setIdOf(cardId)).catch(() => null);
+  const brief = set?.cards?.find(c => c.id === cardId) || {};
+  const h = holdings().get(cardId) || { qty: 0, wish: false, ids: [] };
+  $('#pkImg').hidden = !brief.image;
+  if (brief.image) $('#pkImg').src = brief.image + '/low.webp';
+  $('#pkName').textContent = brief.name || cardId;
+  $('#pkMeta').textContent = [set?.name, brief.localId && `#${brief.localId}`].filter(Boolean).join(' · ');
+  $('#pkHave').textContent = [h.qty ? `✓ ${h.qty} in your collection` : '', h.wish ? '♥ On your wishlist' : ''].filter(Boolean).join(' · ');
+  $('#pkCollection').innerHTML = h.qty ? '&#10003; Add another copy…' : '&#10003; Add to collection…';
+  $('#pkWishlist').innerHTML = h.wish ? '&#9829; Remove from wishlist' : '&#9825; Add to wishlist';
+  $('#pkView').hidden = !h.qty;
+  pickDialog.showModal();
+}
+
+$('#pkCollection').addEventListener('click', () => {
+  pickDialog.close();
+  openFormWithCard(pickCardId, 'collection');
+});
+$('#pkWishlist').addEventListener('click', async () => {
+  const id = pickCardId;
+  pickDialog.close();
+  const existing = items.find(i => i.list === 'wishlist' && i.cardId === id);
+  if (existing) {
+    items = items.filter(i => i !== existing);
+    save(); render();
+    toast(`Removed ${existing.name} from your wishlist`);
+    return;
+  }
+  try { await quickWishlist(id); }
+  catch (err) { toast("Couldn't add it: " + err.message); }
+});
+$('#pkView').addEventListener('click', () => {
+  const h = holdings().get(pickCardId);
+  pickDialog.close();
+  if (h?.ids[0]) openDetail(h.ids[0]);
+});
+
+// One tap: add a card to the wishlist with its first priced version.
+async function quickWishlist(cardId) {
+  const card = await getCard(cardId);
+  const opts = priceOptions(card);
+  const opt = opts[0];
+  const it = migrate({
+    ...cardIdentity(card), kind: 'card', list: 'wishlist', added: today(),
+    variant: opt?.key || '', variantName: opt?.label || '', condition: 'Near Mint', qty: 1, prices: [],
+  });
+  if (opt) { it.tcgId = opt.productId; upsertPrice(it, today(), opt.price, 'TCGplayer market'); }
+  items.push(it);
+  save(); render();
+  toast(`♥ Added ${it.name} to your wishlist${opt ? ` (${money(opt.price)})` : ''}`);
+}
+
+// =====================================================================
+// Camera scan: read the card's name and number on the phone, then match it
+// =====================================================================
+const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+let ocrWorker = null;
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = () => rej(new Error('could not load the text reader (are you online?)'));
+    document.head.appendChild(s);
+  });
+}
+
+async function getOcr() {
+  if (ocrWorker) return ocrWorker;
+  if (!window.Tesseract) await loadScript(TESSERACT_URL);
+  ocrWorker = await Tesseract.createWorker('eng');
+  return ocrWorker;
+}
+
+// Shrink the photo, make it grayscale and boost contrast so small print reads better.
+async function prepImage(bmp, crop = null, scale = 1, angle = 0) {
+  const sx = crop ? crop.x * bmp.width : 0, sy = crop ? crop.y * bmp.height : 0;
+  const sw = crop ? crop.w * bmp.width : bmp.width, sh = crop ? crop.h * bmp.height : bmp.height;
+  const k = Math.min(1, 1800 / Math.max(sw, sh)) * scale;
+  const c = document.createElement('canvas');
+  c.width = Math.round(sw * k); c.height = Math.round(sh * k);
+  const g = c.getContext('2d');
+  if (angle) { // straighten a tilted photo
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    g.translate(c.width / 2, c.height / 2); g.rotate(angle * Math.PI / 180); g.translate(-c.width / 2, -c.height / 2);
+  }
+  g.drawImage(bmp, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  const img = g.getImageData(0, 0, c.width, c.height), d = img.data;
+  let lo = 255, hi = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    d[i] = y; if (y < lo) lo = y; if (y > hi) hi = y;
+  }
+  const span = Math.max(1, hi - lo);
+  for (let i = 0; i < d.length; i += 4) { const v = (d[i] - lo) * 255 / span; d[i] = d[i + 1] = d[i + 2] = v; }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+// Card numbers look like "060/131", "4/102", "TG05/TG30" or "GG01/GG70".
+function findNumbers(text) {
+  const t = text.replace(/[|\\]/g, '/').replace(/(\d)\s*[Il1]\s*(?=\d{2,3}\b)/g, '$1/');
+  const out = [], re = /\b([A-Z]{0,3}\d{1,3})\s*\/\s*([A-Z]{0,3}\d{2,3})\b/gi;
+  let m;
+  while ((m = re.exec(t))) {
+    const local = m[1].toUpperCase().replace(/O/g, '0'), total = m[2].toUpperCase().replace(/O/g, '0');
+    if (!out.some(o => o.local === local && o.total === total)) out.push({ local, total });
+  }
+  return out;
+}
+
+const normId = s => String(s).toUpperCase().replace(/^([A-Z]*)0+(?=\d)/, '$1');
+// A number counts only if some set actually has that many cards (or it's a TG/GG-style number).
+const plausibleNumber = text => findNumbers(text).some(n =>
+  /[A-Z]/.test(n.total) || sets.some(s => s.official === parseInt(n.total, 10)));
+const nameWords = n => n.toLowerCase().replace(/[^a-z0-9' ]/g, ' ').split(/\s+/)
+  .filter(w => w.length >= 3 && !['vmax', 'vstar', 'gx'].includes(w));
+
+async function matchScan(text, nameText = '') {
+  const lower = text.toLowerCase();
+  const scoreName = name => nameWords(name).reduce((a, w) => a + (lower.includes(w) ? w.length : 0), 0);
+  const found = [];
+  for (const { local, total } of findNumbers(text)) {
+    const totalNum = parseInt(total.replace(/\D/g, ''), 10);
+    const prefix = total.replace(/\d/g, '');
+    // Sets with that many cards (newest first); Trainer Gallery etc. have their own sub-sets.
+    const cand = sets.filter(s => prefix ? true : s.official === totalNum).reverse().slice(0, prefix ? 40 : 15);
+    const lists = await Promise.all(cand.map(s => getSet(s.id).catch(() => null)));
+    lists.forEach(set => {
+      if (!set) return;
+      if (prefix && !(set.cards || []).some(c => normId(c.localId).startsWith(prefix))) return;
+      const card = (set.cards || []).find(c => normId(c.localId) === normId(local));
+      if (card && !found.some(f => f.id === card.id)) found.push({ ...card, setName: set.name, score: 5 + scoreName(card.name) });
+    });
+  }
+  if (found.length) return found.sort((a, b) => b.score - a.score);
+
+  // No readable number: try the most name-like words, starting with the top of the card where the name is.
+  const words = [...new Set(((nameText + '\n' + text).match(/[A-Za-z][A-Za-z'’.-]{3,}/g) || []).map(w => w.replace(/[’.]/g, '')))]
+    .filter(w => w.length >= 5 || /^[A-Z][a-z]+$/.test(w))
+    .filter(w => !/^(basic|stage|evolves|from|weakness|resistance|retreat|pokemon|pokémon|illus|ability|trainer|energy|damage|attach|discard|opponent|this|your|turn)$/i.test(w))
+    .slice(0, 5);
+  for (const w of words) {
+    const cards = await getJSON(`${API}/cards?name=${encodeURIComponent(w)}`).catch(() => []);
+    if (cards.length && cards.length < 300) {
+      $('#cardQuery').value = w;
+      // Use any number fragments that were read (e.g. "006" or "165") to rank the right printing first.
+      const digits = new Set((text.match(/\d{1,3}/g) || []).map(d => String(parseInt(d, 10))));
+      return cards.map(c => {
+        const s = setById.get(setIdOf(c.id));
+        const score = (digits.has(String(parseInt(c.localId, 10))) ? 4 : 0) + (s?.official && digits.has(String(s.official)) ? 3 : 0)
+          + (c.name.toLowerCase() === w.toLowerCase() ? 1 : 0);
+        return { ...c, setName: s?.name || setIdOf(c.id), score: score >= 7 ? score + 5 : score };
+      }).sort((a, b) => b.score - a.score || (setOrder.get(setIdOf(b.id)) ?? -1) - (setOrder.get(setIdOf(a.id)) ?? -1)).slice(0, 60);
+    }
+  }
+  return [];
+}
+
+function showScanResults(cards, note, warn = '') {
+  const box = $('#results');
+  box.innerHTML = cards.map((c, i) => `<button type="button" class="result ${i === 0 && (c.score > 5 || cards.length === 1) ? 'best' : ''}" data-card="${esc(c.id)}">
+      ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy">` : '<div class="ph">no image</div>'}
+      <b>${esc(c.name)}</b><span>${esc(c.setName)} · #${esc(c.localId)}</span></button>`).join('');
+  setScanStatus(note, warn);
+}
+
+function setScanStatus(msg, warn = '') {
+  const s = $('#scanStatus');
+  s.hidden = false;
+  s.innerHTML = esc(msg) + (warn ? `<br><span class="scan-warn">⚠ ${esc(warn)}</span>` : '');
+}
+
+// How crooked the printed text came out: tilted cards give sloped text lines,
+// and a card that isn't flat (phone held at an angle) gives lines with different slopes.
+function textTilt(data) {
+  const angles = [];
+  (data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l => {
+    const bl = l.baseline;
+    if (!bl || !bl.has_baseline || bl.x1 - bl.x0 < 80) return;
+    angles.push(Math.atan2(bl.y1 - bl.y0, bl.x1 - bl.x0) * 180 / Math.PI);
+  })));
+  if (angles.length < 3) return null;
+  angles.sort((a, b) => a - b);
+  const mid = angles[Math.floor(angles.length / 2)];
+  const spread = angles[Math.floor(angles.length * 0.85)] - angles[Math.floor(angles.length * 0.15)];
+  return { angle: mid, spread };
+}
+
+// Read a card image and show matching cards. `cropped` = the image is just the card (from the in-app camera).
+async function scanImage(bmp, { cropped = false, tiltAtCapture = null } = {}) {
+  $('#results').innerHTML = '';
+  try {
+    setScanStatus(ocrWorker ? 'Reading the card…' : 'Getting the text reader ready (first time only, a few seconds)…');
+    const worker = await getOcr();
+    let tilt = null;
+    const read = async (crop, scale, angle, withLines = false) => {
+      const res = await worker.recognize(await prepImage(bmp, crop, scale, angle), {}, withLines ? { text: true, blocks: true } : { text: true });
+      if (withLines) tilt = textTilt(res.data);
+      return res.data.text;
+    };
+    // The number is small and at the bottom of the card. Try a few views until one shows it.
+    const passes = cropped ? [
+      [null, 1, 0, true],
+      [{ x: 0, y: 0.86, w: 1, h: 0.14 }, 2.5, 0],
+      [{ x: 0, y: 0.72, w: 1, h: 0.28 }, 2, 0],
+      [{ x: 0, y: 0.72, w: 1, h: 0.28 }, 2, 4],
+      [{ x: 0, y: 0.72, w: 1, h: 0.28 }, 2, -4],
+    ] : [
+      [null, 1, 0, true],
+      [{ x: 0, y: 0.80, w: 1, h: 0.20 }, 2, 0],
+      [{ x: 0, y: 0.45, w: 1, h: 0.55 }, 1.6, 0],
+      [{ x: 0, y: 0.45, w: 1, h: 0.55 }, 1.6, 5],
+      [{ x: 0, y: 0.45, w: 1, h: 0.55 }, 1.6, -5],
+    ];
+    let text = '';
+    for (let i = 0; i < passes.length; i++) {
+      setScanStatus(`Reading the card… (${i + 1}/${passes.length})`);
+      text += '\n' + await read(...passes[i]);
+      if (plausibleNumber(text)) break;
+    }
+    const nameText = plausibleNumber(text) ? '' : await read({ x: 0, y: 0, w: 1, h: cropped ? 0.16 : 0.3 }, 1.6, 0);
+
+    // Flatness warning: from the phone's tilt sensor at capture, or from crooked text in the photo.
+    let warn = '';
+    if (tiltAtCapture != null && tiltAtCapture > 12) warn = 'Your phone wasn\'t flat when you took this. Lay the card on a table and hold your phone straight above it.';
+    else if (tilt && (Math.abs(tilt.angle) > 4 || tilt.spread > 4)) warn = 'The card looks tilted or not flat. Lay it on a table, hold your phone straight above it, and line it up with the frame.';
+
+    setScanStatus('Looking up the card…');
+    const matches = await matchScan(text, nameText);
+    if (!matches.length) {
+      setScanStatus("Couldn't read this card. Try again with the card filling the frame, flat and without glare — or type the name above.", warn);
+      return;
+    }
+    const n = findNumbers(text)[0];
+    showScanResults(matches, n
+      ? `Read card number ${n.local}/${n.total}. Tap the right card to continue.`
+      : `Couldn't read the card number, so here are cards named "${$('#cardQuery').value}". Tap the right one.`, warn);
+  } catch (err) {
+    setScanStatus('Scan failed: ' + err.message);
+  }
+}
+
+$('#scanInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  scanImage(await createImageBitmap(file));
+});
+
+// ---------- In-app camera with a flatness level ----------
+const camView = $('#camView'), camVideo = $('#camVideo');
+let camStream = null, camTilt = null, camGotMotion = false;
+
+function onOrient(e) {
+  if (e.beta == null || e.gamma == null) return;
+  camGotMotion = true;
+  $('#camLevel').hidden = false;
+  // Lying flat (screen up, camera pointing down at the card) reads beta ≈ 0 and gamma ≈ 0.
+  const beta = Math.max(-90, Math.min(90, e.beta)), gamma = e.gamma;
+  camTilt = Math.hypot(beta, gamma);
+  const clamp = v => Math.max(-1, Math.min(1, v / 20));
+  $('#camBubble').style.transform = `translate(${clamp(gamma) * 22}px, ${clamp(beta) * 22}px)`;
+  const state = camTilt <= 5 ? 'flat' : camTilt <= 12 ? 'almost' : 'tilted';
+  $('#camGuide').className = 'cam-guide ' + state;
+  $('#camBubble').style.background = { flat: '#3ad17a', almost: '#f5c242', tilted: '#ff5a5a' }[state];
+  const msg = $('#camMsg');
+  msg.className = 'cam-msg ' + { flat: 'good', almost: 'meh', tilted: 'bad' }[state];
+  msg.textContent = {
+    flat: '✓ Flat — line the card up and tap the button',
+    almost: 'Almost flat — level your phone a little more',
+    tilted: 'Not flat enough — lay the card on a table and hold your phone straight above it',
+  }[state];
+}
+
+async function openCamera() {
+  // iPhone asks for motion access; this must start right inside the tap.
+  let motion = Promise.resolve('granted');
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    motion = DeviceOrientationEvent.requestPermission().catch(() => 'denied');
+  }
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false,
+    });
+  } catch {
+    return false;
+  }
+  camVideo.srcObject = camStream;
+  camTilt = null; camGotMotion = false;
+  $('#camLevel').hidden = true;
+  $('#camGuide').className = 'cam-guide';
+  $('#camMsg').className = 'cam-msg';
+  $('#camMsg').textContent = 'Line the card up inside the frame';
+  camView.showModal();
+  camVideo.play().catch(() => {});
+  if (await motion === 'granted') window.addEventListener('deviceorientation', onOrient);
+  return true;
+}
+
+function closeCamera() {
+  window.removeEventListener('deviceorientation', onOrient);
+  if (camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null;
+  if (camView.open) camView.close();
+}
+camView.addEventListener('close', closeCamera);
+$('#camCancel').addEventListener('click', closeCamera);
+$('#camUpload').addEventListener('click', () => { closeCamera(); $('#scanInput').click(); });
+
+// Grab what's inside the card frame (plus a small margin) from the live video.
+async function captureCard() {
+  const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
+  if (!vw || !vh) throw new Error('camera not ready yet');
+  const vr = camVideo.getBoundingClientRect();
+  const scale = Math.max(vr.width / vw, vr.height / vh); // object-fit: cover
+  const ox = vr.left + (vr.width - vw * scale) / 2, oy = vr.top + (vr.height - vh * scale) / 2;
+  const g = $('#camGuide').getBoundingClientRect();
+  const m = 0.04;
+  let sx = (g.left - ox) / scale - g.width / scale * m, sy = (g.top - oy) / scale - g.height / scale * m;
+  let sw = g.width / scale * (1 + 2 * m), sh = g.height / scale * (1 + 2 * m);
+  sx = Math.max(0, sx); sy = Math.max(0, sy); sw = Math.min(vw - sx, sw); sh = Math.min(vh - sy, sh);
+  const c = document.createElement('canvas');
+  c.width = Math.round(sw); c.height = Math.round(sh);
+  c.getContext('2d').drawImage(camVideo, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return createImageBitmap(c);
+}
+
+$('#camShutter').addEventListener('click', async () => {
+  try {
+    const bmp = await captureCard();
+    const tiltAtCapture = camGotMotion ? camTilt : null;
+    closeCamera();
+    scanImage(bmp, { cropped: true, tiltAtCapture });
+  } catch (err) {
+    $('#camMsg').textContent = 'Hold on — ' + err.message;
+  }
+});
+
+$$('.scanBtn').forEach(b => b.addEventListener('click', () => {
+  if (!itemDialog.open) openItemForm(null, view === 'wishlist' ? 'wishlist' : 'collection');
+  formKind = 'card'; picked = null; pickedOpts = []; syncForm();
+  $('#results').innerHTML = '';
+  if (navigator.mediaDevices?.getUserMedia) {
+    openCamera().then(ok => {
+      if (ok) return;
+      setScanStatus("Couldn't open the camera here. ");
+      $('#scanStatus').insertAdjacentHTML('beforeend', '<button type="button" id="scanPick" class="small-btn">Choose a photo instead</button>');
+    });
+  } else {
+    $('#scanInput').click(); // must happen right away so the phone allows it
+  }
+}));
+$('#scanStatus').addEventListener('click', e => { if (e.target.id === 'scanPick') $('#scanInput').click(); });
+
+// =====================================================================
 // Start
 // =====================================================================
 render();
 updateRefreshStatus();
 loadSets().then(() => {
+  fillBrowseSets();
+  if (view === 'sets') renderSetGrid();
   const last = +localStorage.getItem(REFRESH_KEY);
   if (items.length && Date.now() - last > 12 * 36e5) refreshAll();
 });
