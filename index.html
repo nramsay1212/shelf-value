@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -16,9 +16,12 @@
 </head>
 <body>
   <header class="top">
-    <button id="settingsBtn" class="settings-btn">&#9881; Settings</button>
+    <div class="top-right">
+      <span id="syncBadge" class="sync-badge" hidden></span>
+      <button id="settingsBtn">&#9881; Settings</button>
+    </div>
     <h1>Shelf Value</h1>
-    <p class="sub">Pokémon card collection tracker with free, automatic TCGplayer market prices. Your collection stays in this browser.</p>
+    <p class="sub">Pokémon card collection tracker with free, automatic TCGplayer market prices.</p>
   </header>
 
   <main>
@@ -328,6 +331,28 @@
         <h2>Settings</h2>
         <button type="button" data-close class="icon" aria-label="Close">&#10005;</button>
       </div>
+      <section class="sync-box">
+        <h3>&#9729; Back up &amp; sync</h3>
+        <div id="syncOff">
+          <p class="muted small">Keep your collection safe in the cloud and the same on all your devices.</p>
+          <label>Invite code <input id="syncInvite" autocomplete="off" spellcheck="false" placeholder="from the person who set up Shelf Value"></label>
+          <button type="button" id="syncCreate" class="primary">Turn on sync (new collection)</button>
+          <p class="muted small or">— or, on your other device —</p>
+          <label>Your sync code <input id="syncJoinCode" autocomplete="off" spellcheck="false" placeholder="e.g. teal-moon-quartz-otter-4821"></label>
+          <button type="button" id="syncJoin">Connect this device</button>
+        </div>
+        <div id="syncOn" hidden>
+          <p class="small">Sync is on. Your sync code:</p>
+          <div class="code-row"><code id="syncCodeShow"></code><button type="button" id="syncCopy" class="small-btn">Copy</button></div>
+          <p class="muted small">Enter this code on your other devices to see the same collection. Keep it private, like a password.</p>
+          <div class="row">
+            <button type="button" id="syncNow">Sync now</button>
+            <button type="button" id="syncOffBtn" class="danger">Turn off on this device</button>
+          </div>
+        </div>
+        <p id="syncMsg" class="small"></p>
+      </section>
+      <h3>eBay prices</h3>
       <p class="muted small">For graded (PSA/CGC/BGS), raw and sealed price ranges from current eBay listings,
         paste the address of your eBay price worker (see the README on GitHub for the 10-minute free setup).
         It's saved only in this browser.</p>
@@ -344,7 +369,7 @@
   </dialog>
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.

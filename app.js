@@ -16,7 +16,30 @@ let items = readJSON(STORE_KEY, []).map(migrate);
 function readJSON(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
 }
-function save() { localStorage.setItem(STORE_KEY, JSON.stringify(items)); }
+// Change tracking for sync: each item gets `updatedAt` when it changes, and deleted
+// items leave a "tombstone" (id -> time) so the deletion reaches other devices too.
+const TOMB_KEY = 'shelf-value-tombstones';
+let tombstones = readJSON(TOMB_KEY, {});
+const snapshots = new Map();
+const stampOf = it => { const { updatedAt, ...rest } = it; return JSON.stringify(rest); };
+function resetSnapshots() { snapshots.clear(); items.forEach(it => snapshots.set(it.id, stampOf(it))); }
+
+function save() {
+  const now = Date.now(), ids = new Set();
+  let changed = false;
+  items.forEach(it => {
+    ids.add(it.id);
+    const s = stampOf(it);
+    if (snapshots.get(it.id) !== s) { it.updatedAt = now; snapshots.set(it.id, s); changed = true; }
+  });
+  for (const id of [...snapshots.keys()]) {
+    if (!ids.has(id)) { snapshots.delete(id); tombstones[id] = now; changed = true; }
+  }
+  localStorage.setItem(STORE_KEY, JSON.stringify(items));
+  localStorage.setItem(TOMB_KEY, JSON.stringify(tombstones));
+  if (changed && typeof schedulePush === 'function') schedulePush();
+}
+resetSnapshots();
 function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -1048,7 +1071,7 @@ dataMenu.addEventListener('click', e => {
   if (act === 'export-csv') download(`shelf-value-${today()}.csv`, toCSV(), 'text/csv');
   if (act === 'import') $('#fileInput').click();
   if (act === 'clear') {
-    if (!confirm('Delete your whole collection and wishlist from this browser? Export a backup first if you want to keep it.')) return;
+    if (!confirm('Delete your whole collection and wishlist? If sync is on, this also deletes it from your other devices and the cloud. Export a backup first if you want to keep it.')) return;
     items = []; save(); render();
   }
 });
@@ -1906,10 +1929,203 @@ $('#scanStatus').addEventListener('click', e => {
 });
 
 // =====================================================================
+// Cloud backup & sync (your own Cloudflare worker; see worker/ebay-worker.js)
+// =====================================================================
+const SYNC_DEFAULT_URL = 'https://shelf-value-ebay.nramsay1212.workers.dev';
+const SYNC_CODE_KEY = 'shelf-value-sync-code';
+const SYNC_REV_KEY = 'shelf-value-sync-rev';
+const SYNC_AT_KEY = 'shelf-value-sync-at';
+const syncUrl = () => workerUrl() || SYNC_DEFAULT_URL;
+const syncCode = () => localStorage.getItem(SYNC_CODE_KEY) || '';
+let syncRev = +localStorage.getItem(SYNC_REV_KEY) || 0;
+let syncBusy = false, syncAgain = false, pushTimer = null, syncError = '';
+
+const SYNC_WORDS = ('amber anchor apple arrow aspen autumn badger bamboo basil beacon berry birch blaze bloom bluebird bramble breeze brook cactus candle canyon cedar cherry cinder clover cobalt comet copper coral cosmos cotton crimson crystal daisy dawn delta dune echo ember falcon fern fjord flame flint forest fossil fox frost galaxy garnet glacier glow granite grove harbor hazel heron honey indigo iris island ivory jade jasmine juniper kelp kestrel lagoon lantern lava lemon lilac lotus lunar maple marble meadow meteor mint misty moss nebula nectar north oasis ocean olive onyx orbit orchid otter pebble pepper pine pixel plum polar poppy prism quartz rain raven reef ridge river robin ruby saffron sage sapphire shadow silver sky slate solar sparrow spruce storm summit sunset thistle thunder tide timber topaz tulip tundra valley velvet violet willow winter zephyr').split(' ');
+
+function newSyncCode() {
+  const r = crypto.getRandomValues(new Uint32Array(5));
+  const words = [0, 1, 2, 3].map(i => SYNC_WORDS[r[i] % SYNC_WORDS.length]);
+  return `${words.join('-')}-${1000 + (r[4] % 9000)}`;
+}
+
+async function syncFetch(path, opts = {}, code = syncCode()) {
+  const r = await fetch(syncUrl() + path, {
+    ...opts, headers: { 'Content-Type': 'application/json', 'X-Sync-Code': code, ...(opts.headers || {}) },
+  });
+  const body = await r.json().catch(() => ({}));
+  return { status: r.status, body };
+}
+
+// Combine two copies of the collection: newest version of each card wins; deletions win over older edits.
+function mergeCollections(localItems, localTombs, remote) {
+  const tombs = { ...(remote?.tombstones || {}) };
+  Object.entries(localTombs).forEach(([id, t]) => { if (!tombs[id] || tombs[id] < t) tombs[id] = t; });
+  const map = new Map();
+  (remote?.items || []).forEach(it => map.set(it.id, it));
+  localItems.forEach(it => { const r = map.get(it.id); if (!r || (it.updatedAt || 0) > (r.updatedAt || 0)) map.set(it.id, it); });
+  const cutoff = Date.now() - 120 * 864e5; // forget deletions after ~4 months
+  Object.keys(tombs).forEach(id => { if (tombs[id] < cutoff) delete tombs[id]; });
+  const merged = [...map.values()].filter(it => !(tombs[it.id] && tombs[it.id] >= (it.updatedAt || 0))).map(migrate);
+  return { items: merged, tombstones: tombs };
+}
+const fingerprint = (list, tombs) => JSON.stringify([list.map(i => `${i.id}:${i.updatedAt || 0}`).sort(), Object.keys(tombs || {}).sort()]);
+
+function applyMerged(m) {
+  items = m.items;
+  tombstones = m.tombstones;
+  resetSnapshots();
+  localStorage.setItem(STORE_KEY, JSON.stringify(items));
+  localStorage.setItem(TOMB_KEY, JSON.stringify(tombstones));
+  render();
+  if (detailId) renderDetail();
+}
+
+function setSyncRev(rev) {
+  syncRev = rev;
+  localStorage.setItem(SYNC_REV_KEY, String(rev));
+  localStorage.setItem(SYNC_AT_KEY, String(Date.now()));
+}
+
+// Get the latest from the cloud, merge, and send back anything this device has that the cloud doesn't.
+async function syncNow() {
+  if (!syncCode()) return;
+  if (syncBusy) { syncAgain = true; return; }
+  syncBusy = true; syncError = '';
+  updateSyncBadge('Syncing…');
+  try {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const got = await syncFetch('/sync');
+      if (got.status === 404) throw new Error('this sync code was not found');
+      if (got.status !== 200) throw new Error(got.body.error || `error ${got.status}`);
+      const remote = got.body;
+      const m = mergeCollections(items, tombstones, remote.data);
+      const changedHere = fingerprint(m.items, m.tombstones) !== fingerprint(items, tombstones);
+      if (changedHere) applyMerged(m);
+      if (remote.data && fingerprint(m.items, m.tombstones) === fingerprint(remote.data.items || [], remote.data.tombstones)) {
+        setSyncRev(remote.rev); break; // cloud already has everything
+      }
+      const put = await syncFetch('/sync', {
+        method: 'PUT',
+        body: JSON.stringify({ baseRev: remote.rev, data: { items: m.items, tombstones: m.tombstones, settings, savedAt: Date.now() } }),
+      });
+      if (put.status === 200) { setSyncRev(put.body.rev); break; }
+      if (put.status !== 409) throw new Error(put.body.error || `error ${put.status}`);
+      // 409: the other device saved at the same moment — loop and merge again
+    }
+  } catch (err) {
+    syncError = err.message.includes('Failed to fetch') ? 'offline' : err.message;
+  } finally {
+    syncBusy = false;
+    updateSyncBadge();
+    if (syncAgain) { syncAgain = false; syncNow(); }
+  }
+}
+
+function schedulePush() {
+  if (!syncCode()) return;
+  clearTimeout(pushTimer);
+  updateSyncBadge('Saving…');
+  pushTimer = setTimeout(syncNow, 3000); // wait for a pause in editing, so a burst of changes is one save
+}
+
+function updateSyncBadge(busy = '') {
+  const b = $('#syncBadge');
+  if (!syncCode()) { b.hidden = true; return; }
+  b.hidden = false;
+  b.className = 'sync-badge';
+  if (busy) { b.textContent = '☁ ' + busy; return; }
+  if (syncError) {
+    b.classList.add('err');
+    b.textContent = syncError === 'offline' ? '☁ Offline — will sync later' : '☁ Sync problem';
+    b.title = syncError;
+    return;
+  }
+  const at = +localStorage.getItem(SYNC_AT_KEY);
+  const mins = at ? Math.round((Date.now() - at) / 6e4) : null;
+  b.classList.add('ok');
+  b.textContent = '☁ Synced' + (mins == null ? '' : mins < 1 ? '' : mins < 60 ? ` ${mins}m ago` : ` ${Math.round(mins / 60)}h ago`);
+  b.title = '';
+}
+
+function renderSyncSettings(msg = '', isError = false) {
+  const on = !!syncCode();
+  $('#syncOff').hidden = on;
+  $('#syncOn').hidden = !on;
+  $('#syncCodeShow').textContent = syncCode();
+  const m = $('#syncMsg');
+  m.textContent = msg || (on && syncError ? `Last sync failed: ${syncError}` : '');
+  m.className = 'small ' + (isError ? 'error' : msg ? 'ok' : '');
+}
+
+$('#syncCreate').addEventListener('click', async () => {
+  const invite = $('#syncInvite').value.trim();
+  if (!invite) return renderSyncSettings('Enter the invite code first.', true);
+  const code = newSyncCode();
+  renderSyncSettings('Setting up…');
+  try {
+    const r = await syncFetch('/sync/register', { method: 'POST', body: JSON.stringify({ invite }) }, code);
+    if (r.status !== 200) throw new Error(r.body.error || `error ${r.status}`);
+    localStorage.setItem(SYNC_CODE_KEY, code);
+    setSyncRev(0);
+    await syncNow();
+    renderSyncSettings(`✓ Sync is on and your ${items.length} item${items.length === 1 ? ' is' : 's are'} backed up. Write your sync code down somewhere safe.`);
+  } catch (err) {
+    renderSyncSettings("Couldn't turn on sync: " + err.message, true);
+  }
+});
+
+$('#syncJoin').addEventListener('click', async () => {
+  const code = $('#syncJoinCode').value.trim().toLowerCase().replace(/\s+/g, '-');
+  if (code.length < 12) return renderSyncSettings('Enter the whole sync code from your other device.', true);
+  renderSyncSettings('Connecting…');
+  try {
+    const r = await syncFetch('/sync', {}, code);
+    if (r.status === 404) throw new Error("that code wasn't found — check it matches your other device exactly");
+    if (r.status !== 200) throw new Error(r.body.error || `error ${r.status}`);
+    const remoteCount = r.body.data?.items?.length || 0;
+    if (items.length) {
+      const keep = confirm(`This device already has ${items.length} item${items.length === 1 ? '' : 's'}; the synced collection has ${remoteCount}.\n\n` +
+        'OK = combine them (keeps both)\nCancel = replace this device\'s items with the synced collection');
+      if (!keep) { items.forEach(it => { delete it.updatedAt; }); items = []; tombstones = {}; resetSnapshots(); }
+    }
+    localStorage.setItem(SYNC_CODE_KEY, code);
+    setSyncRev(0);
+    await syncNow();
+    renderSyncSettings(`✓ Connected. ${items.length} item${items.length === 1 ? '' : 's'} on this device now.`);
+  } catch (err) {
+    renderSyncSettings("Couldn't connect: " + err.message, true);
+  }
+});
+
+$('#syncNow').addEventListener('click', async () => {
+  await syncNow();
+  renderSyncSettings(syncError ? '' : '✓ Up to date.', !!syncError);
+});
+$('#syncCopy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(syncCode()); renderSyncSettings('Copied.'); }
+  catch { renderSyncSettings('Select the code and copy it.'); }
+});
+$('#syncOffBtn').addEventListener('click', () => {
+  if (!confirm('Turn off sync on this device? Your cards stay on this device and in the cloud — you can reconnect any time with your sync code.')) return;
+  localStorage.removeItem(SYNC_CODE_KEY);
+  localStorage.removeItem(SYNC_REV_KEY);
+  renderSyncSettings('Sync is off on this device.');
+  updateSyncBadge();
+});
+$('#settingsBtn').addEventListener('click', () => renderSyncSettings());
+
+// Pull changes from other devices when the app opens, comes back to the front, and every minute while open.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
+setInterval(() => { if (!document.hidden) syncNow(); }, 60e3);
+setInterval(() => { if (!syncBusy) updateSyncBadge(); }, 30e3);
+
+// =====================================================================
 // Start
 // =====================================================================
 render();
 updateRefreshStatus();
+updateSyncBadge();
+syncNow();
 loadSets().then(() => {
   fillBrowseSets();
   if (view === 'sets') renderSetsView();

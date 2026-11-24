@@ -403,3 +403,22 @@ dialog.pick { width: min(420px, 94vw); }
   .set-head img { height: 36px; }
   #setSort { flex: 1 1 100%; }
 }
+
+/* ---------- Sync ---------- */
+.top-right { position: absolute; right: 20px; top: 28px; display: flex; align-items: center; gap: 8px; }
+.sync-badge { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.sync-badge.err { color: var(--down); }
+.sync-badge.ok { color: var(--up); }
+.sync-box { border: 1px solid var(--border); border-radius: 10px; padding: 4px 14px 12px; display: grid; gap: 10px; }
+.sync-box h3, #settingsDialog > form > h3 { margin: 10px 0 0; color: var(--text); text-transform: none; letter-spacing: 0; font-size: 15px; }
+#syncOff, #syncOn { display: grid; gap: 10px; }
+#syncOff[hidden], #syncOn[hidden] { display: none; }
+.sync-box .or { text-align: center; margin: 2px 0; }
+.code-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.code-row code { font-size: 17px; font-weight: 700; padding: 6px 10px; border-radius: 6px; background: var(--row-hover); letter-spacing: .02em; word-break: break-all; }
+#syncMsg:empty { display: none; }
+@media (max-width: 640px) {
+  .top-right { top: 16px; right: 14px; }
+  .top-right button { padding: 6px 10px; }
+  .top h1 { padding-right: 170px; }
+}

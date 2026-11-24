@@ -19,7 +19,7 @@ A free Pokémon card collection tracker with automatic prices.
 
 ## Your data
 
-Everything is stored in your browser's local storage; nothing is uploaded.
+Everything is stored in your browser, and optionally backed up and synced between devices (see below).
 Each browser/device has its own copy, so use **Data → Export backup** and **Import** to move it, and back up now and then.
 
 ## How prices work
@@ -62,3 +62,12 @@ powershell -ExecutionPolicy Bypass -File serve.ps1
 Then open http://localhost:8080
 
 Not affiliated with Nintendo, The Pokémon Company, TCGplayer, or any grading company.
+
+## Backup & sync (optional, free)
+
+The same Cloudflare worker also stores a synced copy of your collection (Cloudflare KV, free plan).
+In **⚙ Settings → Back up & sync**, enter the invite code to create a collection and get a private
+**sync code**; enter that sync code on your other devices to share the same collection. Each person
+gets their own code and their own separate collection. Only a SHA-256 fingerprint of each code is stored.
+
+Worker setup for sync: bind a KV namespace as `SYNC` and add a secret `INVITE_CODE`.
