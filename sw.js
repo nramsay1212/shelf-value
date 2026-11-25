@@ -1,5 +1,5 @@
 // Shelf Value service worker: lets the app open offline and caches card images.
-const VERSION = 'v7';
+const VERSION = 'v8';
 const SHELL = `shelf-shell-${VERSION}`;
 const IMAGES = 'shelf-images';
 const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
@@ -56,7 +56,8 @@ self.addEventListener('push', e => {
       if (meta) {
         const { code, url } = await meta.json();
         const a = await (await fetch(url + '/sync/alerts', { headers: { 'X-Sync-Code': code } })).json();
-        if (a.list && a.list.length) {
+        if (a.test) { title = 'Shelf Value test notification'; body = 'Price alerts are working on this device. 🎉'; }
+        else if (a.list && a.list.length) {
           title = a.list.length === 1 ? `${a.list[0].name} hit your target price` : `${a.list.length} wishlist cards hit your target price`;
           body = a.list.map(x => `${x.name}${x.set ? ' (' + x.set + ')' : ''}: ${money(x.price)} — target ${money(x.target)}`).join('\n');
         }

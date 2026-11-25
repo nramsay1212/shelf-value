@@ -84,6 +84,14 @@ async function handleSync(req, env, url, cors) {
   if (!current) return json({ error: 'No collection found for that sync code' }, 404, cors);
   const hash = key.slice(4);
 
+  // Send a test notification to this person's phones right now.
+  if (url.pathname === '/sync/push/test' && req.method === 'POST') {
+    const subs = (await env.SYNC.get('push:' + hash, 'json')) || [];
+    if (!subs.length) return json({ ok: false, devices: 0, error: 'No devices have price alerts turned on for this collection' }, 200, cors);
+    await env.SYNC.put('alerts:' + hash, JSON.stringify({ at: Date.now(), test: true, list: [] }));
+    const result = await sendPushes(env, hash, true);
+    return json({ ok: result.sent > 0, devices: subs.length, ...result }, 200, cors);
+  }
   // Phone notifications: save / remove this device's push subscription.
   if (url.pathname === '/sync/push') {
     const body = await req.json().catch(() => ({}));
@@ -231,10 +239,10 @@ async function vapidJwt(env, aud) {
   return `${unsigned}.${b64url(sig)}`;
 }
 
-async function sendPushes(env, hash) {
-  if (!env.VAPID_PRIVATE_JWK || !env.VAPID_PUBLIC) return 0;
+async function sendPushes(env, hash, detailed = false) {
+  if (!env.VAPID_PRIVATE_JWK || !env.VAPID_PUBLIC) return detailed ? { sent: 0, errors: ['alert keys missing on worker'] } : 0;
   const subs = (await env.SYNC.get('push:' + hash, 'json')) || [];
-  const keep = [];
+  const keep = [], errors = [];
   let sent = 0;
   for (const s of subs) {
     try {
@@ -243,13 +251,14 @@ async function sendPushes(env, hash) {
         headers: { TTL: '86400', Urgency: 'high', 'Content-Length': '0',
           Authorization: `vapid t=${await vapidJwt(env, new URL(s.endpoint).origin)}, k=${env.VAPID_PUBLIC}` },
       });
-      if (r.status === 404 || r.status === 410) continue; // phone unsubscribed
+      if (r.status === 404 || r.status === 410) { errors.push(`${new URL(s.endpoint).host}: device unsubscribed (${r.status})`); continue; }
       if (r.ok) sent++;
+      else errors.push(`${new URL(s.endpoint).host}: ${r.status} ${(await r.text()).slice(0, 160)}`);
       keep.push(s);
-    } catch { keep.push(s); }
+    } catch (e) { errors.push(e.message); keep.push(s); }
   }
   if (keep.length !== subs.length) await env.SYNC.put('push:' + hash, JSON.stringify(keep));
-  return sent;
+  return detailed ? { sent, errors } : sent;
 }
 
 function json(body, status, headers) {

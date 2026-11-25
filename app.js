@@ -2158,6 +2158,7 @@ async function renderAlertsSetting() {
   const sub = await currentSubscription();
   btn.textContent = sub && Notification.permission === 'granted' ? 'Turn off price alerts on this device' : 'Turn on price alerts';
   btn.classList.toggle('danger', !!sub);
+  $('#alertsTest').hidden = !sub;
   if (Notification.permission === 'denied') {
     hint.hidden = false;
     hint.textContent = 'Notifications are blocked for Shelf Value. Allow them in your phone\'s Settings → Notifications, then try again.';
@@ -2191,6 +2192,22 @@ $('#alertsBtn').addEventListener('click', async () => {
   renderAlertsSetting();
 });
 
+$('#alertsTest').addEventListener('click', async () => {
+  renderSyncSettings('Sending…');
+  try {
+    // Make sure the worker has this device (in case it was turned on before sync, or got lost).
+    const sub = await currentSubscription();
+    if (sub) await syncFetch('/sync/push', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) });
+    await storeSyncMeta();
+    const r = await syncFetch('/sync/push/test', { method: 'POST', body: '{}' });
+    if (r.status !== 200) throw new Error(r.body.error || `error ${r.status}`);
+    if (r.body.sent) renderSyncSettings(`✓ Sent to ${r.body.sent} device${r.body.sent > 1 ? 's' : ''}. It should pop up within a few seconds — if this app is open on screen, look in Notification Centre.`);
+    else renderSyncSettings("Couldn't send: " + (r.body.error || (r.body.errors || []).join('; ') || 'unknown problem'), true);
+  } catch (err) {
+    renderSyncSettings("Couldn't send: " + err.message, true);
+  }
+});
+
 // Also show new alerts inside the app when it opens.
 async function checkAlertsInApp() {
   if (!syncCode()) return;
@@ -2198,7 +2215,7 @@ async function checkAlertsInApp() {
     const r = await syncFetch('/sync/alerts');
     const a = r.body;
     const seen = +localStorage.getItem(ALERT_SEEN_KEY) || 0;
-    if (r.status === 200 && a.at > seen && a.list?.length) {
+    if (r.status === 200 && a.at > seen && !a.test && a.list?.length) {
       localStorage.setItem(ALERT_SEEN_KEY, String(a.at));
       const first = a.list[0];
       toast(a.list.length === 1
