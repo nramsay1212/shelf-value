@@ -1428,12 +1428,18 @@ async function renderSetList() {
   // How many different cards you own per set
   const ownedPerSet = new Map();
   holdings().forEach((h, cardId) => { if (h.qty) { const s = setIdOf(cardId); ownedPerSet.set(s, (ownedPerSet.get(s) || 0) + 1); } });
-  const html = eras.map(e => {
+  // Which eras are open: what you chose before, else the newest era and any era you collect from.
+  const saved = readJSON(ERA_OPEN_KEY, null);
+  const html = eras.map((e, i) => {
     const list = [...e.sets].reverse().filter(s =>
       (!q || s.name.toLowerCase().includes(q) || e.name.toLowerCase().includes(q) || s.id.toLowerCase() === q) &&
       (!mineOnly || ownedPerSet.get(s.id)));
     if (!list.length) return '';
-    return `<div class="era"><h3>${esc(e.name)}</h3><span class="muted small">${list.length} set${list.length > 1 ? 's' : ''}</span></div>
+    const ownedSets = e.sets.filter(s => ownedPerSet.get(s.id)).length;
+    const open = q || mineOnly ? true : saved ? !!saved[e.id] : (i === 0 || ownedSets > 0);
+    return `<details class="era-group" data-era="${esc(e.id)}" ${open ? 'open' : ''}>
+      <summary class="era"><span class="chev">▸</span><h3>${esc(e.name)}</h3>
+        <span class="muted small">${list.length} set${list.length > 1 ? 's' : ''}${ownedSets ? ` · collecting ${ownedSets}` : ''}</span></summary>
       <div class="set-cards">${list.map(s => {
         const own = ownedPerSet.get(s.id) || 0, tot = s.total || s.official || 0;
         return `<button class="set-card" data-set="${esc(s.id)}">
@@ -1441,10 +1447,29 @@ async function renderSetList() {
           <span><b>${esc(s.name)}</b><small>${tot ? `${tot} cards` : ''}${own ? ` · ${own} owned` : ''}</small>
           ${own && tot ? `<div class="mini"><span style="width:${Math.min(100, own / tot * 100)}%"></span></div>` : ''}</span>
         </button>`;
-      }).join('')}</div>`;
+      }).join('')}</div></details>`;
   }).join('');
-  body.innerHTML = html || `<p class="empty">${mineOnly ? 'You don\'t own cards from any matching set yet.' : 'No sets match that search.'}</p>`;
+  body.innerHTML = html
+    ? `<div class="era-tools"><button type="button" class="small-btn" data-eras="open">Open all</button>
+        <button type="button" class="small-btn" data-eras="close">Close all</button></div>` + html
+    : `<p class="empty">${mineOnly ? 'You don\'t own cards from any matching set yet.' : 'No sets match that search.'}</p>`;
 }
+
+// Remember which eras you open or close (not while searching, when everything matching opens).
+const ERA_OPEN_KEY = 'shelf-value-eras-open';
+function saveEraState() {
+  if ($('#setSearch').value.trim() || $('#setMineOnly').checked) return;
+  const state = {};
+  $$('#setListBody details[data-era]').forEach(d => { state[d.dataset.era] = d.open; });
+  localStorage.setItem(ERA_OPEN_KEY, JSON.stringify(state));
+}
+$('#setListBody').addEventListener('toggle', saveEraState, true);
+$('#setListBody').addEventListener('click', e => {
+  const b = e.target.closest('[data-eras]');
+  if (!b) return;
+  $$('#setListBody details[data-era]').forEach(d => { d.open = b.dataset.eras === 'open'; });
+  saveEraState();
+});
 
 $('#setSearch').addEventListener('input', () => renderSetList());
 $('#setMineOnly').addEventListener('change', () => renderSetList());

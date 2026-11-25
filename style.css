@@ -464,3 +464,13 @@ img[data-zoom] { cursor: zoom-in; }
 #imgViewImg { max-width: min(94vw, 700px); max-height: 86dvh; width: auto; height: auto; object-fit: contain; border-radius: 14px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, .6); cursor: zoom-out; }
 .img-hint { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); left: 0; right: 0; margin: 0; text-align: center; color: rgba(255,255,255,.7); font-size: 13px; }
+
+/* ---------- Collapsible eras ---------- */
+.era-tools { display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 4px; }
+.era-group { border-bottom: 1px solid var(--border); }
+.era-group > summary { list-style: none; cursor: pointer; padding: 12px 4px; margin: 0; user-select: none; }
+.era-group > summary::-webkit-details-marker { display: none; }
+.era-group > summary:hover h3 { color: var(--accent); }
+.era-group .chev { display: inline-block; width: 16px; color: var(--muted); transition: transform .15s; }
+.era-group[open] .chev { transform: rotate(90deg); }
+.era-group > .set-cards { padding: 2px 0 14px; }
