@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -25,6 +25,15 @@
   </header>
 
   <main>
+    <!-- Search every card -->
+    <section class="search-bar">
+      <div class="search-row">
+        <input id="cardSearch" type="search" placeholder="Search all cards… e.g. charizard 4/102, pikachu 151" autocomplete="off" spellcheck="false" enterkeyhint="search">
+        <button type="button" id="cardSearchClear" class="small-btn" hidden>Clear</button>
+      </div>
+      <div id="cardSearchResults" class="card-search" hidden></div>
+    </section>
+
     <!-- Value chart -->
     <section class="card hero">
       <div class="hero-head">
@@ -481,7 +490,7 @@
   </dialog>
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.

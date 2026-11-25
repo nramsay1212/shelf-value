@@ -474,3 +474,18 @@ img[data-zoom] { cursor: zoom-in; }
 .era-group .chev { display: inline-block; width: 16px; color: var(--muted); transition: transform .15s; }
 .era-group[open] .chev { transform: rotate(90deg); }
 .era-group > .set-cards { padding: 2px 0 14px; }
+
+/* ---------- Search every card ---------- */
+.search-bar { display: grid; gap: 10px; }
+.search-row { display: flex; gap: 8px; align-items: center; }
+#cardSearch { flex: 1; font-size: 16px; padding: 12px 14px 12px 38px; border-radius: 10px;
+  background: var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%238a94a3' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E") no-repeat 12px center; }
+.card-search { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.card-search .cs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; font-size: 14px; }
+.card-search .cs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.card-search .cs-more { margin-top: 12px; width: 100%; }
+.card-search .note { color: var(--muted); padding: 10px 0; text-align: center; }
+@media (max-width: 640px) {
+  .card-search { padding: 8px; }
+  .card-search .cs-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+}

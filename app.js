@@ -530,6 +530,9 @@ function render() {
   $('#listToolbar').hidden = sets;
   $('.table-wrap').hidden = sets;
 
+  // keep ✓ / ♥ marks in the card search up to date after adding something
+  if (typeof csResults !== 'undefined' && csResults.length && !$('#cardSearchResults').hidden) renderCardSearch(csToken);
+
   $('#itemsTable').className = 'v-' + view;
   $('#viewExtra').hidden = true;
   if (sets) renderSetsView();
@@ -2356,6 +2359,139 @@ async function checkAlertsInApp() {
 }
 
 $('#settingsBtn').addEventListener('click', () => { renderAlertsSetting(); storeSyncMeta(); });
+
+// =====================================================================
+// Search every card (top of the app): live results with pictures and prices
+// =====================================================================
+const nameSearchCache = new Map();
+let csToken = 0, csTimer = null, csResults = [], csShown = 0;
+const CS_PAGE = 36;
+
+async function cardsByName(name) {
+  const key = name.toLowerCase();
+  if (!nameSearchCache.has(key)) {
+    nameSearchCache.set(key, getJSON(`${API}/cards?name=${encodeURIComponent(name)}`)
+      .then(list => list.filter(c => !isPocket(setIdOf(c.id))))
+      .catch(err => { nameSearchCache.delete(key); throw err; }));
+  }
+  return nameSearchCache.get(key);
+}
+
+// Does a leftover word describe this card? (set name, card number like 4 / 004 / 4/102 / TG05)
+function wordFits(card, w) {
+  const set = setById.get(setIdOf(card.id));
+  const setName = (set?.name || '').toLowerCase();
+  const m = w.replace(/^#/, '').match(/^([a-z]{0,4}\d+[a-z]?)(?:\/([a-z]{0,4}\d+))?$/i);
+  if (m) {
+    const numOk = normId(m[1]) === normId(card.localId);
+    const totOk = !m[2] || String(set?.official) === String(parseInt(m[2].replace(/\D/g, ''), 10)) || /[a-z]/i.test(m[2]);
+    if (numOk && totOk) return true;
+  }
+  return setName.includes(w) || setIdOf(card.id).toLowerCase() === w;
+}
+
+// Understands "charizard", "charizard 4/102", "pikachu 151", "151 pikachu", "umbreon vmax evolving".
+async function smartCardSearch(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  // Try the longest run of words as the card name, the rest must match the set or number.
+  const tries = [];
+  for (let len = words.length; len >= 1; len--) {
+    for (let start = 0; start + len <= words.length; start++) {
+      const nameWords = words.slice(start, start + len);
+      if (!nameWords.some(w => /[a-z]/.test(w))) continue;        // a name needs letters
+      if (nameWords.join('').replace(/[^a-z]/g, '').length < 2) continue;
+      tries.push({ name: nameWords.join(' '), rest: [...words.slice(0, start), ...words.slice(start + len)] });
+    }
+  }
+  for (const t of tries.slice(0, 8)) {
+    let cards;
+    try { cards = await cardsByName(t.name); } catch { continue; }
+    const hits = cards.filter(c => t.rest.every(w => wordFits(c, w)));
+    if (hits.length) return { cards: hits, name: t.name, rest: t.rest };
+  }
+  return { cards: [], name: q, rest: [] };
+}
+
+function sortCards(cards) {
+  return [...cards].sort((a, b) =>
+    (setOrder.get(setIdOf(b.id)) ?? -1) - (setOrder.get(setIdOf(a.id)) ?? -1) ||
+    (parseInt(a.localId, 10) || 0) - (parseInt(b.localId, 10) || 0));
+}
+
+async function runCardSearch() {
+  const q = $('#cardSearch').value.trim();
+  const box = $('#cardSearchResults');
+  $('#cardSearchClear').hidden = !q;
+  const token = ++csToken;
+  if (q.length < 2) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+  box.innerHTML = '<p class="note">Searching…</p>';
+  try {
+    if (!sets.length) await loadSets();
+    const { cards } = await smartCardSearch(q);
+    if (token !== csToken) return;
+    csResults = sortCards(cards);
+    csShown = 0;
+    renderCardSearch(token);
+  } catch (err) {
+    if (token === csToken) box.innerHTML = `<p class="note">Couldn't search right now (${esc(err.message)}).</p>`;
+  }
+}
+
+function renderCardSearch(token, grow = false) {
+  const box = $('#cardSearchResults');
+  if (!csResults.length) {
+    box.innerHTML = `<p class="note">No cards found for "${esc($('#cardSearch').value.trim())}". Check the spelling, or try just the Pokémon's name.</p>`;
+    return;
+  }
+  if (grow || !csShown) csShown = Math.min(csResults.length, csShown + CS_PAGE);
+  const have = holdings();
+  const owned = csResults.filter(c => have.get(c.id)?.qty).length;
+  box.innerHTML = `<div class="cs-head"><b>${csResults.length} card${csResults.length === 1 ? '' : 's'}</b>
+      <span class="muted">${owned ? `you own ${owned} · ` : ''}tap a card to add it</span></div>
+    <div class="cs-grid">${csResults.slice(0, csShown).map(c => {
+      const h = have.get(c.id);
+      const state = h?.qty ? 'owned' : h?.wish ? 'wish' : 'missing';
+      const s = setById.get(setIdOf(c.id));
+      return `<div class="tile ${state === 'missing' ? '' : state}" data-card="${esc(c.id)}">
+        ${cardImg(c.id, c.image)}
+        ${h?.qty > 1 ? `<span class="qty-badge">×${h.qty}</span>` : ''}
+        ${state !== 'missing' ? `<span class="mark">${state === 'owned' ? '✓' : '♥'}</span>` : ''}
+        <b>${esc(c.name)}</b><span>${esc(s?.name || setIdOf(c.id))} · #${esc(c.localId)}</span>
+        <span class="price" data-price="${esc(c.id)}"></span></div>`;
+    }).join('')}</div>
+    ${csShown < csResults.length ? `<button type="button" class="cs-more">Show more (${csResults.length - csShown} left)</button>` : ''}`;
+  loadSearchPrices(token);
+}
+
+// Prices for the cards on screen, a few at a time.
+async function loadSearchPrices(token) {
+  const spans = $$('#cardSearchResults [data-price]').filter(s => !s.textContent);
+  const queue = [...spans];
+  const worker = async () => {
+    while (queue.length && token === csToken) {
+      const span = queue.shift();
+      try {
+        const card = await getCard(span.dataset.price);
+        const opt = priceOptions(card)[0];
+        if (token === csToken) span.textContent = opt ? money(opt.price) : '—';
+      } catch { /* leave blank */ }
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+}
+
+$('#cardSearch').addEventListener('input', () => { clearTimeout(csTimer); csTimer = setTimeout(runCardSearch, 300); });
+$('#cardSearch').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { clearTimeout(csTimer); runCardSearch(); e.target.blur(); }
+  if (e.key === 'Escape') { e.target.value = ''; runCardSearch(); }
+});
+$('#cardSearchClear').addEventListener('click', () => { $('#cardSearch').value = ''; runCardSearch(); });
+$('#cardSearchResults').addEventListener('click', e => {
+  if (e.target.closest('.cs-more')) { renderCardSearch(csToken, true); return; }
+  const tile = e.target.closest('.tile[data-card]');
+  if (tile) openPick(tile.dataset.card);
+});
 
 // =====================================================================
 // Rapid scan: keep the camera open, scan a stack, review everything at the end
