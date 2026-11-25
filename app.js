@@ -194,7 +194,7 @@ async function refreshItem(it) {
 async function refreshAll() {
   if (refreshing) return;
   // TCGplayer prices for raw cards, then eBay ranges for graded, sealed and grading picks.
-  const jobs = items.filter(isAutoPriced).map(it => () => refreshItem(it));
+  const jobs = items.filter(it => isAutoPriced(it) && it.list !== 'sold').map(it => () => refreshItem(it));
   const tcgCount = jobs.length;
   if (workerUrl()) ebayTargets().forEach(it => jobs.push(() => refreshEbay(it)));
   if (!jobs.length) { updateRefreshStatus(); return; }
@@ -385,14 +385,14 @@ function gradeEval(it) {
 }
 
 const gradingCandidates = () => items.filter(it =>
-  it.list === 'collection' && it.kind === 'card' && it.condition === 'Near Mint' &&
+  it.list === 'collection' && it.kind === 'card' && it.condition === 'Near Mint' && !activeSub(it) &&
   itemStats(it).unit >= (settings.gMin || 0));
 
 // =====================================================================
 // Main view
 // =====================================================================
 // A notification tap opens ?view=wishlist
-let view = ['collection', 'wishlist', 'sets', 'grading'].includes(new URLSearchParams(location.search).get('view')) ? new URLSearchParams(location.search).get('view') : 'collection';
+let view = ['collection', 'wishlist', 'sets', 'grading', 'sold'].includes(new URLSearchParams(location.search).get('view')) ? new URLSearchParams(location.search).get('view') : 'collection';
 let rangeDays = 0;
 
 function statTile(label, value, extraClass = '') {
@@ -429,6 +429,8 @@ function render() {
   const gain = total - cost;
   const wishTotal = wish.reduce((a, r) => a + r.s.value, 0);
   const picks = gradingCandidates().filter(it => gradeEval(it).verdict === 'go').length;
+  const soldItems = items.filter(i => i.list === 'sold');
+  const salesProfit = soldItems.filter(it => it.paid != null).reduce((a, it) => a + saleProfit(it), 0);
 
   renderHero();
   $('#stats').innerHTML =
@@ -436,10 +438,12 @@ function render() {
     statTile('Gain / loss', signedMoney(gain) + `<small>${pct(cost ? gain / cost * 100 : null)}</small>`, cls(gain)) +
     statTile('Items owned', count.toLocaleString()) +
     statTile('Wishlist cost', money(wishTotal)) +
-    statTile('Worth grading', picks ? `${picks} card${picks > 1 ? 's' : ''}` : '—');
+    statTile('Worth grading', picks ? `${picks} card${picks > 1 ? 's' : ''}` : '—') +
+    (soldItems.length ? statTile('Profit from sales', signedMoney(salesProfit), cls(salesProfit)) : '');
 
   // view tabs with counts
-  const counts = { collection: coll.length, wishlist: wish.length, grading: gradingCandidates().length, sets: '' };
+  const atGrader = items.filter(i => i.list === 'collection' && activeSub(i)).length;
+  const counts = { collection: coll.length, wishlist: wish.length, grading: gradingCandidates().length + atGrader, sets: '', sold: soldItems.length };
   $$('#viewTabs button').forEach(b => {
     b.classList.toggle('on', b.dataset.view === view);
     b.innerHTML = b.textContent.replace(/\s*\d+$/, '') + `<span class="count">${counts[b.dataset.view]}</span>`;
@@ -460,8 +464,10 @@ function render() {
   $('.table-wrap').hidden = sets;
 
   $('#itemsTable').className = 'v-' + view;
+  $('#viewExtra').hidden = true;
   if (sets) renderSetsView();
   else if (view === 'grading') renderGrading();
+  else if (view === 'sold') renderSold();
   else renderList(view === 'collection' ? coll : wish);
 }
 
@@ -488,7 +494,8 @@ function applyFilters(rows) {
 const thumb = it => it.image
   ? `<td class="thumb"><img src="${esc(it.image)}/low.webp" alt="" loading="lazy"></td>`
   : `<td class="thumb"><div class="ph">${it.kind === 'card' ? 'card' : 'box'}</div></td>`;
-const nameCell = it => `<td class="name">${esc(it.name)}${it.category ? `<span class="tag">${esc(it.category)}</span>` : ''}
+const nameCell = it => `<td class="name">${esc(it.name)}${it.category ? `<span class="tag">${esc(it.category)}</span>` : ''}${
+  it.grading && it.grading.status !== 'done' && it.list === 'collection' ? `<span class="badge grading">At ${esc(it.grading.grader)}</span>` : ''}
   <small>${esc([it.setName, it.number && '#' + it.number].filter(Boolean).join(' · '))}</small></td>`;
 const dash = '<span class="muted">—</span>';
 
@@ -540,6 +547,17 @@ function renderList(rows) {
 }
 
 function renderGrading() {
+  // Cards currently at a grading company
+  const subs = items.filter(i => i.list === 'collection' && activeSub(i))
+    .sort((a, b) => (a.grading.sent || '').localeCompare(b.grading.sent || ''));
+  $('#viewExtra').hidden = !subs.length;
+  $('#viewExtra').innerHTML = subs.length ? `<h3 class="section-title">📦 At the grader (${subs.length})</h3>
+    <div class="table-wrap"><table class="compact subs"><thead><tr><th></th><th>Card</th><th>Grader</th><th>Status</th><th class="num">Days</th><th class="num">Fee</th></tr></thead><tbody>
+    ${subs.map(it => {
+      const g = it.grading, days = Math.max(0, Math.round((Date.now() - new Date(g.sent + 'T00:00:00')) / 864e5));
+      return `<tr data-id="${it.id}">${thumb(it)}${nameCell(it)}<td>${esc(g.grader)}${g.service ? `<small class="muted"> ${esc(g.service)}</small>` : ''}</td>
+        <td>${SUB_STATUS[g.status] || g.status}</td><td class="num">${days}</td><td class="num">${g.fee != null ? money(g.fee) : dash}</td></tr>`;
+    }).join('')}</tbody></table></div><h3 class="section-title">💡 Grading picks</h3>` : '';
   let rows = applyFilters(gradingCandidates().map(it => ({ it, s: itemStats(it), g: gradeEval(it) })));
   const rank = { go: 0, maybe: 1, need: 2, no: 3 };
   rows.sort((a, b) => rank[a.g.verdict] - rank[b.g.verdict] || (b.g.profit ?? 0) - (a.g.profit ?? 0) || b.s.unit - a.s.unit);
@@ -581,6 +599,10 @@ $('#ranges').addEventListener('click', e => {
 ['#search', '#categoryFilter', '#setFilter', '#typeFilter', '#sort'].forEach(s =>
   $(s).addEventListener(s === '#search' ? 'input' : 'change', render));
 $('#itemsTable tbody').addEventListener('click', e => {
+  const tr = e.target.closest('tr[data-id]');
+  if (tr) openDetail(tr.dataset.id);
+});
+$('#viewExtra').addEventListener('click', e => {
   const tr = e.target.closest('tr[data-id]');
   if (tr) openDetail(tr.dataset.id);
 });
@@ -857,6 +879,13 @@ function renderDetail() {
   $('#tcgLink').hidden = !it.tcgId;
   if (it.tcgId) $('#tcgLink').href = `https://www.tcgplayer.com/product/${it.tcgId}`;
   $('#moveBtn').hidden = !wish;
+  const inColl = it.list === 'collection';
+  $('#sellBtn').hidden = !inColl;
+  $('#gradeSendBtn').hidden = !(inColl && it.kind === 'card' && !isGraded(it) && !activeSub(it));
+  $('#unsellBtn').hidden = it.list !== 'sold';
+  $('#editBtn').hidden = it.list === 'sold';
+  renderSubBox(it);
+  renderSaleBox(it);
 
   // live TCGplayer prices for every version of this card
   $('#dLive').textContent = '';
@@ -881,7 +910,7 @@ function renderDetail() {
   }
 
   // grading box
-  const showGrade = !wish && it.kind === 'card' && !isGraded(it);
+  const showGrade = it.list === 'collection' && it.kind === 'card' && !isGraded(it) && !activeSub(it);
   $('#gradeBox').hidden = !showGrade;
   if (showGrade) {
     const c = it.comps || {};
@@ -1191,9 +1220,9 @@ async function refreshEbay(it) {
 }
 
 const needsEbay = it => !!workerUrl() && (!it.ebay || Date.now() - it.ebay.fetched > EBAY_MAX_AGE);
-const ebayTargets = () => items.filter(it =>
+const ebayTargets = () => items.filter(it => it.list !== 'sold' && (
   it.kind !== 'card' || isGraded(it) ||
-  (it.list === 'collection' && it.condition === 'Near Mint' && itemStats(it).unit >= (settings.gMin || 0)));
+  (it.list === 'collection' && it.condition === 'Near Mint' && itemStats(it).unit >= (settings.gMin || 0))));
 
 function renderEbayBox(it) {
   const box = $('#ebayBox');
@@ -1751,10 +1780,8 @@ function textTilt(data) {
 }
 
 // Read a card image and show matching cards. `cropped` = the image is just the card (from the in-app camera).
-async function scanImage(bmp, { cropped = false, tiltAtCapture = null } = {}) {
-  $('#results').innerHTML = '';
-  try {
-    setScanStatus(ocrWorker ? 'Reading the card…' : 'Getting the text reader ready (first time only, a few seconds)…');
+// Read one card image and return the matching cards (best first). Used by single and rapid scans.
+async function identifyCard(bmp, { cropped = false, onProgress = () => {} } = {}) {
     const worker = await getOcr();
     let tilt = null;
     const read = async (crop, scale, angle, withLines = false, bin = false) => {
@@ -1782,20 +1809,26 @@ async function scanImage(bmp, { cropped = false, tiltAtCapture = null } = {}) {
     const namePass = [{ x: 0, y: 0, w: 1, h: cropped ? 0.16 : 0.3 }, 1.6, 0];
     let text = '';
     for (let i = 0; i < passes.length; i++) {
-      setScanStatus(`Reading the card… (${i + 1}/${passes.length})`);
+      onProgress(i + 1, passes.length);
       text += '\n' + await read(...passes[i]);
       // Stop early only when the number points at a real card and that card's name was read too.
       if (plausibleNumber(text) && (await matchScan(text)).some(m => m.best)) break;
     }
     const nameText = await read(...namePass) + '\n' + await read(...namePass.slice(0, 3), false, true);
+    return { matches: await matchScan(text, nameText), text, tilt };
+}
+
+async function scanImage(bmp, { cropped = false, tiltAtCapture = null } = {}) {
+  $('#results').innerHTML = '';
+  try {
+    setScanStatus(ocrWorker ? 'Reading the card…' : 'Getting the text reader ready (first time only, a few seconds)…');
+    const { matches, text, tilt } = await identifyCard(bmp, { cropped, onProgress: (i, n) => setScanStatus(`Reading the card… (${i}/${n})`) });
 
     // Flatness warning: from the phone's tilt sensor at capture, or from crooked text in the photo.
     let warn = '';
     if (tiltAtCapture != null && tiltAtCapture > 12) warn = 'Your phone wasn\'t flat when you took this. Lay the card on a table and hold your phone straight above it.';
     else if (tilt && (Math.abs(tilt.angle) > 4 || tilt.spread > 4)) warn = 'The card looks tilted or not flat. Lay it on a table, hold your phone straight above it, and line it up with the frame.';
-
     setScanStatus('Looking up the card…');
-    const matches = await matchScan(text, nameText);
     if (!matches.length) {
       setScanStatus("Couldn't read this card. Try again with the card filling the frame, flat and without glare — or type the name above.", warn, true);
       return;
@@ -1875,6 +1908,13 @@ function closeCamera() {
   if (camStream) camStream.getTracks().forEach(t => t.stop());
   camStream = null;
   if (camView.open) camView.close();
+  if (rapid.active) {
+    rapid.active = false;
+    $('#camCount').hidden = true;
+    $('#camUpload').hidden = false;
+    $('#camCancel').textContent = 'Cancel';
+    if (rapid.results.length) openBatch();
+  }
 }
 camView.addEventListener('close', closeCamera);
 $('#camCancel').addEventListener('click', closeCamera);
@@ -1901,6 +1941,7 @@ async function captureCard() {
 $('#camShutter').addEventListener('click', async () => {
   try {
     const bmp = await captureCard();
+    if (rapid.active) return rapidCaptured(bmp); // keep the camera open for the next card
     const tiltAtCapture = camGotMotion ? camTilt : null;
     closeCamera();
     scanImage(bmp, { cropped: true, tiltAtCapture });
@@ -2226,6 +2267,355 @@ async function checkAlertsInApp() {
 }
 
 $('#settingsBtn').addEventListener('click', () => { renderAlertsSetting(); storeSyncMeta(); });
+
+// =====================================================================
+// Rapid scan: keep the camera open, scan a stack, review everything at the end
+// =====================================================================
+const rapid = { active: false, results: [], working: false };
+
+function startRapid(keep = false) {
+  if (!keep) rapid.results = [];
+  if (!navigator.mediaDevices?.getUserMedia) { alert("This device can't open the camera here."); return; }
+  rapid.active = true;
+  openCamera().then(ok => {
+    if (!ok) { rapid.active = false; alert("Couldn't open the camera."); return; }
+    $('#camUpload').hidden = true;
+    updateRapidCount();
+  });
+}
+$$('.rapidBtn').forEach(b => b.addEventListener('click', () => startRapid()));
+
+function updateRapidCount() {
+  const n = rapid.results.length, done = rapid.results.filter(r => r.status !== 'pending').length;
+  $('#camCount').hidden = !rapid.active;
+  $('#camCount').textContent = n ? `${n} scanned${done < n ? ` · reading ${n - done}…` : ' ✓'}` : '⚡ Rapid scan: tap for each card';
+  $('#camCancel').textContent = n ? `Done (${n})` : 'Cancel';
+}
+
+function rapidCaptured(bmp) {
+  // keep a small picture for the review list
+  const c = document.createElement('canvas');
+  const k = 160 / bmp.height;
+  c.width = Math.round(bmp.width * k); c.height = 160;
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  rapid.results.push({ id: uid(), bmp, thumb: c.toDataURL('image/jpeg', 0.7), status: 'pending', matches: [], choice: null });
+  const g = $('#camGuide');
+  g.classList.remove('cam-flash'); void g.offsetWidth; g.classList.add('cam-flash');
+  if (navigator.vibrate) navigator.vibrate(30);
+  updateRapidCount();
+  processRapid();
+}
+
+// Read the queued cards one at a time in the background while you keep scanning.
+async function processRapid() {
+  if (rapid.working) return;
+  rapid.working = true;
+  try {
+    for (;;) {
+      const r = rapid.results.find(x => x.status === 'pending');
+      if (!r) break;
+      try {
+        const { matches } = await identifyCard(r.bmp, { cropped: true });
+        r.matches = matches.slice(0, 12);
+        r.choice = matches[0]?.id || null;
+        r.status = matches.length ? (matches[0].best ? 'done' : 'unsure') : 'fail';
+      } catch { r.status = 'fail'; }
+      r.bmp = null; // free memory
+      updateRapidCount();
+      if ($('#batchDialog').open) renderBatch();
+    }
+  } finally { rapid.working = false; }
+}
+
+function openBatch() {
+  $('#batchDate').value = today();
+  $('#batchList2').value = view === 'wishlist' ? 'wishlist' : 'collection';
+  renderBatch();
+  if (!$('#batchDialog').open) $('#batchDialog').showModal();
+}
+
+function renderBatch() {
+  const list = $('#batchList');
+  const pending = rapid.results.filter(r => r.status === 'pending').length;
+  const unsure = rapid.results.filter(r => r.status === 'unsure' || r.status === 'fail').length;
+  $('#batchStatus').textContent = pending ? `Reading ${pending} more card${pending > 1 ? 's' : ''}…`
+    : unsure ? `${unsure} card${unsure > 1 ? 's need' : ' needs'} a check — pick the right one from the list, or remove it.`
+    : `All ${rapid.results.length} cards read. Check them over, then tap Add all.`;
+  list.innerHTML = rapid.results.map(r => {
+    const opts = r.matches.map(m => `<option value="${esc(m.id)}" ${m.id === r.choice ? 'selected' : ''}>${esc(m.name)} — ${esc(m.setName)} #${esc(m.localId)}</option>`).join('');
+    const chosen = r.matches.find(m => m.id === r.choice);
+    return `<div class="batch-row ${r.status === 'pending' ? 'pending' : ''} ${r.status === 'fail' ? 'fail' : ''}" data-rid="${r.id}">
+      <img src="${chosen?.image ? esc(chosen.image) + '/low.webp' : r.thumb}" alt="">
+      <div class="who">${r.status === 'pending' ? '<b>Reading…</b>'
+        : r.status === 'fail' ? '<b>Couldn\'t read this one</b><span class="muted small">Remove it and add it by hand.</span>'
+        : `<b>${r.status === 'done' ? '✓ ' : '⚠ Check: '}${esc(chosen?.name || '')}</b><select data-pick>${opts}</select>`}</div>
+      <button type="button" class="del" data-remove title="Remove">✕</button></div>`;
+  }).join('') || '<p class="muted">Nothing scanned.</p>';
+  $('#batchAdd').disabled = pending > 0 || !rapid.results.some(r => r.choice);
+  $('#batchAdd').textContent = pending ? 'Waiting…' : `Add ${rapid.results.filter(r => r.choice).length} card${rapid.results.filter(r => r.choice).length === 1 ? '' : 's'}`;
+}
+
+$('#batchList').addEventListener('change', e => {
+  const row = e.target.closest('[data-rid]');
+  if (!row || !e.target.matches('[data-pick]')) return;
+  const r = rapid.results.find(x => x.id === row.dataset.rid);
+  r.choice = e.target.value;
+  if (r.status === 'unsure') r.status = 'done';
+  renderBatch();
+});
+$('#batchList').addEventListener('click', e => {
+  if (!e.target.closest('[data-remove]')) return;
+  const row = e.target.closest('[data-rid]');
+  rapid.results = rapid.results.filter(x => x.id !== row.dataset.rid);
+  renderBatch();
+});
+$('#batchMore').addEventListener('click', () => { $('#batchDialog').close(); startRapid(true); });
+
+$('#batchAdd').addEventListener('click', async () => {
+  const chosen = rapid.results.filter(r => r.choice);
+  const list = $('#batchList2').value, cond = $('#batchCond').value, cat = $('#batchCat').value.trim(), date = $('#batchDate').value || today();
+  $('#batchAdd').disabled = true;
+  $('#batchStatus').textContent = 'Adding…';
+  // Same card scanned twice = quantity 2.
+  const counts = new Map();
+  chosen.forEach(r => counts.set(r.choice, (counts.get(r.choice) || 0) + 1));
+  let added = 0, offWish = 0;
+  for (const [cardId, qty] of counts) {
+    try {
+      const card = await getCard(cardId);
+      const opt = priceOptions(card)[0];
+      const it = migrate({
+        ...cardIdentity(card), kind: 'card', list, category: cat, condition: cond, qty, added: today(),
+        acquired: list === 'collection' ? date : null, paid: null,
+        variant: opt?.key || '', variantName: opt?.label || '', prices: [],
+      });
+      if (opt) { it.tcgId = opt.productId; upsertPrice(it, today(), opt.price, 'TCGplayer market'); }
+      if (list === 'collection') {
+        const wished = items.find(i => i.list === 'wishlist' && i.cardId === cardId);
+        if (wished) { items = items.filter(i => i !== wished); offWish++; }
+      }
+      items.push(it);
+      added += qty;
+    } catch { /* skip a card that won't load */ }
+  }
+  save();
+  rapid.results = [];
+  $('#batchDialog').close();
+  if (view !== 'sets') view = list;
+  render();
+  toast(`✓ Added ${added} card${added === 1 ? '' : 's'}${offWish ? ` (${offWish} taken off your wishlist)` : ''}. Tap any card to set its version or what you paid.`);
+});
+
+// =====================================================================
+// Sold & traded log
+// =====================================================================
+const saleDialog = $('#saleDialog'), saleForm = $('#saleForm');
+let saleType = 'sold';
+
+const saleProfit = it => {
+  const s = it.sale || {};
+  return (s.amount || 0) - (s.fees || 0) - (it.paid || 0) * (s.qty || it.qty || 1);
+};
+
+function syncSaleForm() {
+  $$('#saleType button').forEach(b => b.classList.toggle('on', b.dataset.t === saleType));
+  $('#saleAmountLabel').firstChild.textContent = saleType === 'sold' ? 'Sold for (total, $) ' : 'Trade value of what you got (total, $) ';
+  const it = items.find(i => i.id === detailId);
+  if (!it) return;
+  const f = saleForm.elements;
+  const qty = Math.min(it.qty || 1, Math.max(1, parseInt(f.qty.value) || 1));
+  const profit = (num(f.amount.value) || 0) - (num(f.fees.value) || 0) - (it.paid || 0) * qty;
+  $('#saleProfit').innerHTML = it.paid != null && num(f.amount.value) != null
+    ? `Profit: <b class="${cls(profit)}">${signedMoney(profit)}</b> <span class="muted">(you paid ${money((it.paid || 0) * qty)})</span>`
+    : it.paid == null ? '<span class="muted">Add what you paid (Edit) to see your profit.</span>' : '';
+}
+
+$('#sellBtn').addEventListener('click', () => {
+  const it = items.find(i => i.id === detailId);
+  saleForm.reset();
+  saleType = 'sold';
+  const f = saleForm.elements;
+  f.date.value = today();
+  f.qty.value = it.qty || 1;
+  f.qty.max = it.qty || 1;
+  const s = itemStats(it);
+  f.amount.placeholder = s.priced ? `market ≈ ${money(s.unit * (it.qty || 1))}` : '0.00';
+  $('#saleWhat').textContent = `${it.name}${it.setName ? ' · ' + it.setName : ''} · ${versionText(it)} · you have ${it.qty || 1}`;
+  syncSaleForm();
+  saleDialog.showModal();
+});
+$('#saleType').addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (b) { saleType = b.dataset.t; syncSaleForm(); } });
+saleForm.addEventListener('input', syncSaleForm);
+
+saleForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const it = items.find(i => i.id === detailId);
+  const f = saleForm.elements;
+  const qty = Math.min(it.qty || 1, Math.max(1, parseInt(f.qty.value) || 1));
+  const sale = { type: saleType, date: f.date.value || today(), qty, amount: num(f.amount.value) || 0, fees: num(f.fees.value) || 0, notes: f.notes.value.trim() };
+  let soldItem = it;
+  if (qty < (it.qty || 1)) {
+    // Sold some of them: split off the sold copies.
+    it.qty -= qty;
+    soldItem = migrate({ ...JSON.parse(JSON.stringify(it)), id: uid(), qty, list: 'sold', sale });
+    items.push(soldItem);
+  } else {
+    it.list = 'sold';
+    it.sale = sale;
+  }
+  save();
+  saleDialog.close();
+  detailDialog.close();
+  render();
+  const p = saleProfit(soldItem);
+  toast(`${saleType === 'sold' ? '💰 Sold' : '🔄 Traded'} ${qty} × ${it.name}${soldItem.paid != null ? ` · profit ${signedMoney(p)}` : ''}`);
+});
+
+$('#unsellBtn').addEventListener('click', () => {
+  const it = items.find(i => i.id === detailId);
+  if (!confirm(`Move ${it.name} back into your collection?`)) return;
+  it.list = 'collection';
+  delete it.sale;
+  save();
+  view = 'collection';
+  detailDialog.close();
+  render();
+});
+
+function renderSold() {
+  let rows = applyFilters(items.filter(i => i.list === 'sold').map(it => ({ it, s: itemStats(it) })));
+  rows.sort((a, b) => (b.it.sale?.date || '').localeCompare(a.it.sale?.date || ''));
+  const all = items.filter(i => i.list === 'sold');
+  const received = all.reduce((a, it) => a + (it.sale?.amount || 0), 0);
+  const fees = all.reduce((a, it) => a + (it.sale?.fees || 0), 0);
+  const profit = all.filter(it => it.paid != null).reduce((a, it) => a + saleProfit(it), 0);
+  $('#viewExtra').hidden = !all.length;
+  $('#viewExtra').innerHTML = `<div class="stats small">
+    ${statTile('Cards sold / traded', all.reduce((a, it) => a + (it.sale?.qty || it.qty || 1), 0))}
+    ${statTile('Total received', money(received))}
+    ${statTile('Fees & shipping', money(fees))}
+    ${statTile('Profit', signedMoney(profit), cls(profit))}</div>`;
+  const table = $('#itemsTable');
+  $('thead', table).innerHTML = `<tr><th></th><th>Card</th><th>Version</th><th>Date</th><th></th>
+    <th class="num">Qty</th><th class="num">Received</th><th class="num">Paid</th><th class="num">Profit</th></tr>`;
+  $('tbody', table).innerHTML = rows.map(({ it }) => {
+    const s = it.sale || {}, p = saleProfit(it);
+    return `<tr data-id="${it.id}">${thumb(it)}${nameCell(it)}
+      <td>${esc(versionText(it))}</td><td>${fmtDate(s.date)}</td>
+      <td><span class="badge sold">${s.type === 'traded' ? 'Traded' : 'Sold'}</span></td>
+      <td class="num">${s.qty || it.qty || 1}</td><td class="num">${money(s.amount)}</td>
+      <td class="num">${it.paid != null ? money(it.paid * (s.qty || it.qty || 1)) : dash}</td>
+      <td class="num ${cls(p)}">${it.paid != null ? signedMoney(p) : dash}</td></tr>`;
+  }).join('');
+  $('#empty').hidden = rows.length > 0;
+  $('#empty').innerHTML = all.length ? 'Nothing matches your filters.'
+    : 'Nothing sold or traded yet. Open a card in your collection and tap <b>💰 Sold / traded…</b>';
+}
+
+// =====================================================================
+// Grading tracker
+// =====================================================================
+const SUB_STATUS = { submitted: 'Sent', received: 'Received by grader', grading: 'Being graded', shipped: 'Shipped back', done: 'Back' };
+const activeSub = it => !!(it.grading && it.grading.status !== 'done');
+const subDialog = $('#subDialog'), subForm = $('#subForm');
+let subMode = 'send';
+
+function openSub(mode) {
+  const it = items.find(i => i.id === detailId);
+  subMode = mode;
+  subForm.reset();
+  const f = subForm.elements;
+  $('#subSendFields').hidden = mode !== 'send';
+  $('#subBackFields').hidden = mode !== 'back';
+  $('#subTitle').textContent = mode === 'send' ? 'Send for grading' : 'Grade is back';
+  $('#subWhat').textContent = `${it.name}${it.setName ? ' · ' + it.setName : ''} · ${versionText(it)}`;
+  if (mode === 'send') { f.sent.value = today(); f.fee.value = settings.gFee || ''; }
+  else { f.back.value = today(); $('#subSave').textContent = `Save as ${it.grading.grader} graded`; }
+  if (mode === 'send') $('#subSave').textContent = 'Save';
+  subDialog.showModal();
+}
+$('#gradeSendBtn').addEventListener('click', () => openSub('send'));
+$('#subBack').addEventListener('click', () => openSub('back'));
+
+subForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const it = items.find(i => i.id === detailId);
+  const f = subForm.elements;
+  if (subMode === 'send') {
+    if ((it.qty || 1) > 1 && !confirm(`You have ${it.qty} of this card. Send just one? (OK = one, Cancel = all ${it.qty})`)) {
+      /* send all */
+    } else if ((it.qty || 1) > 1) {
+      it.qty -= 1;
+      const one = migrate({ ...JSON.parse(JSON.stringify(it)), id: uid(), qty: 1 });
+      items.push(one);
+      detailId = one.id;
+      return finishSend(one, f);
+    }
+    finishSend(it, f);
+  } else {
+    const grade = f.grade.value.trim();
+    if (!grade) { alert('Enter the grade it got.'); return; }
+    const fee = it.grading.fee || 0;
+    it.condition = 'Graded';
+    it.grader = it.grading.grader;
+    it.grade = grade;
+    if (f.cert.value.trim()) it.cert = f.cert.value.trim();
+    if (f.addFee.checked && fee) it.paid = (it.paid || 0) + fee;
+    it.grading.status = 'done';
+    it.grading.back = f.back.value || today();
+    it.grading.history = (it.grading.history || []).concat([{ status: 'done', date: it.grading.back }]);
+    save();
+    subDialog.close();
+    render(); renderDetail();
+    toast(`🎉 ${it.name} came back a ${it.grader} ${grade}. Log its graded value from eBay sold listings (button below).`);
+    if (workerUrl()) refreshEbay(it).then(() => { save(); render(); if (detailId) renderDetail(); }).catch(() => {});
+  }
+});
+
+function finishSend(it, f) {
+  it.grading = {
+    status: 'submitted', grader: f.grader.value, service: f.service.value.trim(), sent: f.sent.value || today(),
+    fee: num(f.fee.value), order: f.order.value.trim(), history: [{ status: 'submitted', date: f.sent.value || today() }],
+  };
+  save();
+  subDialog.close();
+  render(); renderDetail();
+  toast(`📦 ${it.name} is marked as sent to ${it.grading.grader}`);
+}
+
+$('#subStatus').addEventListener('change', e => {
+  const it = items.find(i => i.id === detailId);
+  it.grading.status = e.target.value;
+  it.grading.history = (it.grading.history || []).concat([{ status: e.target.value, date: today() }]);
+  save(); render(); renderDetail();
+});
+$('#subCancel').addEventListener('click', () => {
+  const it = items.find(i => i.id === detailId);
+  if (!confirm('Cancel this grading submission? The card stays in your collection as it was.')) return;
+  delete it.grading;
+  save(); render(); renderDetail();
+});
+
+function renderSubBox(it) {
+  const g = it.grading;
+  const show = it.list === 'collection' && activeSub(it);
+  $('#subBox').hidden = !show;
+  if (!show) return;
+  const days = Math.max(0, Math.round((Date.now() - new Date(g.sent + 'T00:00:00')) / 864e5));
+  $('#subInfo').innerHTML = `<p class="small"><b>${esc(g.grader)}</b>${g.service ? ' · ' + esc(g.service) : ''} · sent ${fmtDate(g.sent)} (${days} day${days === 1 ? '' : 's'} ago)
+    ${g.fee != null ? ' · fee ' + money(g.fee) : ''}${g.order ? ' · order #' + esc(g.order) : ''}</p>`;
+  $('#subStatus').value = g.status;
+}
+
+function renderSaleBox(it) {
+  const show = it.list === 'sold';
+  $('#saleBox').hidden = !show;
+  if (!show) return;
+  const s = it.sale || {}, p = saleProfit(it);
+  $('#saleBox').innerHTML = `<h3>${s.type === 'traded' ? 'Traded' : 'Sold'} on ${fmtDate(s.date)}</h3>
+    <p class="small">${s.qty || 1} × for ${money(s.amount)}${s.fees ? ` · fees ${money(s.fees)}` : ''}${it.paid != null ? ` · paid ${money(it.paid * (s.qty || 1))} · <b class="${cls(p)}">profit ${signedMoney(p)}</b>` : ''}</p>
+    ${s.notes ? `<p class="small muted">${esc(s.notes)}</p>` : ''}`;
+}
 
 // =====================================================================
 // Start

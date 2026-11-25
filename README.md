@@ -15,6 +15,9 @@ A free Pokémon card collection tracker with automatic prices.
   "Grade it / Borderline / Keep it raw" verdict, based on your grading fees and odds of a 10
 - **Graded cards and sealed product:** valued from eBay listing ranges (see below), or prices you log yourself
 - One-click **eBay sold listings** and **TCGplayer** links for every item
+- **Rapid scan:** scan a stack of cards back-to-back, review the matches, add them all at once
+- **Sold & trades log:** record sales and trades (fees included) and see your real profit
+- **Grading tracker:** track cards sent to PSA/CGC/BGS, update the status, enter the grade when it comes back
 - Export/import as JSON (backup) or CSV (spreadsheet)
 
 ## Your data

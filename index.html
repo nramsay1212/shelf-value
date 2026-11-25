@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -57,6 +57,7 @@
         <button data-view="wishlist">Wishlist</button>
         <button data-view="sets">Sets</button>
         <button data-view="grading">Grading</button>
+        <button data-view="sold">Sold</button>
       </div>
 
       <div id="setsView" hidden>
@@ -67,6 +68,7 @@
             <label class="check"><input type="checkbox" id="setMineOnly"> Only sets I collect</label>
             <span class="spacer"></span>
             <button class="scanBtn">&#128247; Scan a card</button>
+            <button class="rapidBtn">&#9889; Rapid scan</button>
           </div>
           <div id="setListBody"></div>
         </div>
@@ -117,6 +119,7 @@
         </select>
         <span class="spacer"></span>
         <button class="scanBtn">&#128247; Scan</button>
+        <button class="rapidBtn" title="Scan a stack of cards in a row">&#9889; Rapid scan</button>
         <button id="addBtn" class="primary">+ Add</button>
         <div class="menu">
           <button id="dataBtn">Data &#9662;</button>
@@ -141,6 +144,7 @@
         </div>
       </div>
 
+      <div id="viewExtra" hidden></div>
       <div class="table-wrap">
         <table id="itemsTable"><thead></thead><tbody></tbody></table>
         <p id="empty" class="empty" hidden></p>
@@ -255,6 +259,28 @@
       <button id="editBtn">Edit</button>
       <button id="deleteBtn" class="danger">Delete</button>
     </div>
+    <div class="detail-actions more-actions">
+      <button id="sellBtn" hidden>&#128176; Sold / traded…</button>
+      <button id="gradeSendBtn" hidden>&#128230; Send for grading…</button>
+      <button id="unsellBtn" hidden>&#8617; Move back to collection</button>
+    </div>
+    <section id="subBox" class="grade-box" hidden>
+      <h3>At the grader</h3>
+      <div id="subInfo"></div>
+      <div class="row inline">
+        <label>Status
+          <select id="subStatus">
+            <option value="submitted">Submitted / sent</option>
+            <option value="received">Received by grader</option>
+            <option value="grading">Being graded</option>
+            <option value="shipped">Graded &amp; shipped back</option>
+          </select>
+        </label>
+        <button type="button" id="subBack" class="primary">It's back: enter the grade…</button>
+        <button type="button" id="subCancel" class="danger">Cancel submission</button>
+      </div>
+    </section>
+    <section id="saleBox" class="grade-box" hidden></section>
 
     <section id="ebayBox" class="grade-box" hidden>
       <div class="card-head">
@@ -289,6 +315,79 @@
     </table>
   </dialog>
 
+  <!-- Sold / traded -->
+  <dialog id="saleDialog">
+    <form id="saleForm">
+      <div class="detail-head"><h2>Sold or traded</h2><button type="button" data-close class="icon" aria-label="Close">&#10005;</button></div>
+      <p id="saleWhat" class="sub"></p>
+      <div class="tabs" id="saleType">
+        <button type="button" data-t="sold" class="on">Sold</button>
+        <button type="button" data-t="traded">Traded</button>
+      </div>
+      <div class="row">
+        <label>Date <input name="date" type="date" required></label>
+        <label>How many <input name="qty" type="number" min="1" step="1" value="1"></label>
+      </div>
+      <div class="row">
+        <label id="saleAmountLabel">Sold for (total, $) <input name="amount" type="number" min="0" step="0.01" placeholder="0.00"></label>
+        <label>Fees &amp; shipping you paid ($) <input name="fees" type="number" min="0" step="0.01" placeholder="0.00"></label>
+      </div>
+      <label>Notes <input name="notes" placeholder="e.g. eBay, local card shop, traded for Umbreon VMAX"></label>
+      <p id="saleProfit" class="small"></p>
+      <div class="actions"><button type="button" data-close>Cancel</button><button type="submit" class="primary">Save</button></div>
+    </form>
+  </dialog>
+
+  <!-- Send for grading / grade came back -->
+  <dialog id="subDialog">
+    <form id="subForm">
+      <div class="detail-head"><h2 id="subTitle">Send for grading</h2><button type="button" data-close class="icon" aria-label="Close">&#10005;</button></div>
+      <p id="subWhat" class="sub"></p>
+      <div id="subSendFields">
+        <div class="row">
+          <label>Grader <select name="grader"><option>PSA</option><option>CGC</option><option>BGS</option><option>TAG</option><option>ACE</option><option>Other</option></select></label>
+          <label>Service level <input name="service" placeholder="e.g. Value, Regular"></label>
+        </div>
+        <div class="row">
+          <label>Date sent <input name="sent" type="date"></label>
+          <label>Grading fee (each, $) <input name="fee" type="number" min="0" step="0.01"></label>
+          <label>Order / submission # <input name="order" autocomplete="off"></label>
+        </div>
+      </div>
+      <div id="subBackFields" hidden>
+        <div class="row">
+          <label>Grade <input name="grade" placeholder="e.g. 10, 9.5, 9" autocomplete="off"></label>
+          <label>Cert number (optional) <input name="cert" autocomplete="off"></label>
+          <label>Date back <input name="back" type="date"></label>
+        </div>
+        <label class="check"><input type="checkbox" name="addFee" checked> Add the grading fee to what I paid for it</label>
+      </div>
+      <div class="actions"><button type="button" data-close>Cancel</button><button type="submit" class="primary" id="subSave">Save</button></div>
+    </form>
+  </dialog>
+
+  <!-- Rapid scan review -->
+  <dialog id="batchDialog" class="wide">
+    <div class="detail-head"><h2>Review scanned cards</h2><button type="button" data-close class="icon" aria-label="Close">&#10005;</button></div>
+    <p id="batchStatus" class="muted small"></p>
+    <div id="batchList" class="batch-list"></div>
+    <div class="row">
+      <label>Add to
+        <select id="batchList2"><option value="collection">Collection</option><option value="wishlist">Wishlist</option></select>
+      </label>
+      <label>Condition
+        <select id="batchCond"><option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option><option>Heavily Played</option><option>Damaged</option></select>
+      </label>
+      <label>Category <input id="batchCat" list="categoryList" placeholder="optional"></label>
+      <label>Date acquired <input id="batchDate" type="date"></label>
+    </div>
+    <div class="actions">
+      <button type="button" id="batchMore">&#128247; Scan more</button>
+      <span class="spacer"></span>
+      <button type="button" id="batchAdd" class="primary">Add all</button>
+    </div>
+  </dialog>
+
   <!-- Checklist: choose collection or wishlist -->
   <dialog id="pickDialog" class="pick">
     <div class="pick-head">
@@ -316,6 +415,7 @@
     <div id="camGuide" class="cam-guide"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span></div>
     <div id="camLevel" class="cam-level" hidden><div id="camBubble" class="bubble"></div></div>
     <p id="camMsg" class="cam-msg">Line the card up inside the frame</p>
+    <div id="camCount" class="cam-count" hidden></div>
     <div class="cam-actions">
       <button id="camCancel" class="cam-btn">Cancel</button>
       <button id="camShutter" class="shutter" aria-label="Scan card"></button>
@@ -375,7 +475,7 @@
   </dialog>
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.

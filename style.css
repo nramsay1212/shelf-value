@@ -422,3 +422,34 @@ dialog.pick { width: min(420px, 94vw); }
   .top-right button { padding: 6px 10px; }
   .top h1 { padding-right: 170px; }
 }
+
+/* ---------- Sold, grading tracker, rapid scan ---------- */
+.more-actions { flex-wrap: wrap; margin-top: 6px; }
+.more-actions:not(:has(button:not([hidden]))) { display: none; }
+#saleType, #batchDialog .tabs { margin: 4px 0; }
+.badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 4px; }
+.badge.grading { background: rgba(200, 140, 20, .18); color: #b07a00; }
+.badge.sold { background: var(--row-hover); color: var(--muted); }
+@media (prefers-color-scheme: dark) { .badge.grading { color: #e6b450; } }
+.section-title { margin: 14px 0 6px; font-size: 15px; color: var(--text); text-transform: none; letter-spacing: 0; }
+.cam-count { position: absolute; top: calc(14px + env(safe-area-inset-top)); left: 14px; background: rgba(0,0,0,.55); color: #fff;
+  border-radius: 999px; padding: 6px 12px; font-weight: 700; font-size: 15px; }
+.cam-flash { animation: camflash .35s ease-out; }
+@keyframes camflash { from { box-shadow: 0 0 0 200vmax rgba(255,255,255,.55); } }
+.batch-list { display: grid; gap: 8px; max-height: 48dvh; overflow-y: auto; margin: 6px 0 12px; }
+.batch-row { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+.batch-row img, .batch-row .ph { width: 56px; height: 78px; object-fit: contain; border-radius: 4px; }
+.batch-row .who b { display: block; }
+.batch-row .who select { margin-top: 4px; width: 100%; font-size: 14px; }
+.batch-row.pending { opacity: .65; }
+.batch-row.fail { border-color: var(--down); }
+@media (max-width: 640px) {
+  .views button { font-size: 13px; padding: 6px 2px; }
+  .views .count { margin-left: 2px; }
+  #itemsTable.v-sold :is(th, td):is(:nth-child(3), :nth-child(6), :nth-child(8)) { display: none; }
+  table.subs :is(th, td):is(:nth-child(6)) { display: none; }
+  .batch-row { grid-template-columns: 48px 1fr auto; }
+}
+@media (max-width: 640px) {
+  #batchDialog .row > *, #saleForm .row > *, #subForm .row > * { flex: 1 1 calc(50% - 10px); }
+}

@@ -1,5 +1,5 @@
 // Shelf Value service worker: lets the app open offline and caches card images.
-const VERSION = 'v8';
+const VERSION = 'v9';
 const SHELL = `shelf-shell-${VERSION}`;
 const IMAGES = 'shelf-images';
 const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
