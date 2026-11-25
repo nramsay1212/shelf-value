@@ -143,6 +143,73 @@ async function loadSets() {
 }
 
 const setIdOf = cardId => cardId.slice(0, cardId.lastIndexOf('-'));
+
+// ---- Card pictures ----
+// TCGdex first; about 1 in 12 cards has no TCGdex picture, so fall back to the
+// Pokémon TCG API's image library (different set names), then a "no image" box.
+const PTCG_SETS = {
+  'sm3.5': 'sm35', 'sm7.5': 'sm75', 'sm11.5': 'sm115', 'swsh3.5': 'swsh35', 'swsh4.5': 'swsh45', 'swsh4.5sv': 'swsh45sv',
+  'swsh12.5': 'swsh12pt5', 'swsh12.5gg': 'swsh12pt5gg', 'cel25cc': 'cel25c', 'sv10.5b': 'zsv10pt5', 'sv10.5w': 'rsv10pt5',
+  '2011bw': 'mcd11', '2012bw': 'mcd12', '2014xy': 'mcd14', '2015xy': 'mcd15', '2016xy': 'mcd16', '2017sm': 'mcd17',
+  '2018sm': 'mcd18', '2019sm': 'mcd19', '2021swsh': 'mcd21', '2022swsh': 'mcd22', '2023sv': 'mcd23', '2024sv': 'mcd24',
+};
+const ptcgSet = id => PTCG_SETS[id] || id.replace(/\.5/, 'pt5').replace(/^([a-z]+)0+(\d)/, '$1$2');
+
+function cardImageUrls(cardId, image, hi = false) {
+  const urls = [];
+  if (image) urls.push(`${image}/${hi ? 'high' : 'low'}.webp`);
+  if (cardId && cardId.includes('-')) {
+    const set = ptcgSet(setIdOf(cardId)), local = cardId.slice(cardId.lastIndexOf('-') + 1);
+    const nums = [/^\d+$/.test(local) ? String(parseInt(local, 10)) : local,
+      local.replace(/^([A-Za-z]+)0+(\d)/, '$1$2'), local.replace(/^(\d+)[ab]$/, '$1')];
+    [...new Set(nums)].forEach(n => urls.push(`https://images.pokemontcg.io/${set}/${encodeURIComponent(n)}${hi ? '_hires' : ''}.png`));
+  }
+  return urls;
+}
+
+// <img> that walks through the picture addresses until one loads.
+function cardImg(cardId, image, { hi = false, lazy = true, zoom = false } = {}) {
+  const urls = cardImageUrls(cardId, image, hi);
+  if (!urls.length) return '<div class="ph">no image</div>';
+  return `<img src="${esc(urls[0])}" data-alts="${esc(JSON.stringify(urls.slice(1)))}" ${zoom ? `data-zoom="${esc(cardId || '')}" data-img="${esc(image || '')}"` : ''}
+    alt="" ${lazy ? 'loading="lazy"' : ''} onerror="nextCardImg(this)">`;
+}
+window.nextCardImg = el => {
+  const alts = JSON.parse(el.dataset.alts || '[]');
+  if (alts.length) { el.dataset.alts = JSON.stringify(alts.slice(1)); el.src = alts[0]; return; }
+  el.onerror = null;
+  if (el.dataset.keep) { el.hidden = true; return; } // fixed slots (detail / picker) just hide
+  const ph = document.createElement('div');
+  ph.className = 'ph'; ph.textContent = 'no image';
+  el.replaceWith(ph);
+};
+// Point an existing <img> element at a card's picture (with the same fallbacks).
+function setCardImg(el, cardId, image, hi = false) {
+  const urls = cardImageUrls(cardId, image, hi);
+  el.hidden = !urls.length;
+  el.dataset.keep = '1';
+  el.dataset.zoom = cardId || '';
+  el.dataset.img = image || '';
+  if (!urls.length) return;
+  el.dataset.alts = JSON.stringify(urls.slice(1));
+  el.onerror = () => nextCardImg(el);
+  el.src = urls[0];
+}
+
+// Full-screen picture when you tap a card image.
+function openImageViewer(cardId, image) {
+  const v = $('#imgView'), img = $('#imgViewImg');
+  setCardImg(img, cardId, image, true);
+  img.hidden = false;
+  v.showModal();
+}
+document.addEventListener('click', e => {
+  if (e.target.closest('#imgView')) { $('#imgView').close(); return; } // tap anywhere to close
+  const z = e.target.closest('img[data-zoom]');
+  if (!z || (!z.dataset.zoom && !z.dataset.img)) return;
+  e.preventDefault(); e.stopPropagation();
+  openImageViewer(z.dataset.zoom, z.dataset.img);
+}, true);
 // Pokémon TCG Pocket (the phone game) sets: A1, A2b, B1a, P-A ... not physical cards.
 const isPocket = setId => /^([AB]\d+[a-z]?|P-[AB])$/.test(setId);
 
@@ -491,8 +558,8 @@ function applyFilters(rows) {
     (!q || [it.name, it.setName, it.number, it.category, it.notes, it.rarity, versionText(it)].join(' ').toLowerCase().includes(q)));
 }
 
-const thumb = it => it.image
-  ? `<td class="thumb"><img src="${esc(it.image)}/low.webp" alt="" loading="lazy"></td>`
+const thumb = it => it.kind === 'card' && (it.image || it.cardId)
+  ? `<td class="thumb">${cardImg(it.cardId, it.image)}</td>`
   : `<td class="thumb"><div class="ph">${it.kind === 'card' ? 'card' : 'box'}</div></td>`;
 const nameCell = it => `<td class="name">${esc(it.name)}${it.category ? `<span class="tag">${esc(it.category)}</span>` : ''}${
   it.grading && it.grading.status !== 'done' && it.list === 'collection' ? `<span class="badge grading">At ${esc(it.grading.grader)}</span>` : ''}
@@ -638,7 +705,7 @@ function showPicked() {
   if (!picked) return;
   const f = itemForm.elements;
   $('#picked').innerHTML = `
-    ${picked.image ? `<img src="${esc(picked.image)}/low.webp" alt="">` : '<div class="ph" style="width:80px;height:112px">card</div>'}
+    ${picked.image || picked.cardId ? cardImg(picked.cardId, picked.image, { lazy: false, zoom: true }) : '<div class="ph" style="width:80px;height:112px">card</div>'}
     <div class="grow">${esc(picked.name)}
       <small>${esc([picked.setName, '#' + picked.number, picked.rarity].filter(Boolean).join(' · '))}</small></div>
     ${editingId ? '' : '<button type="button" id="changeCard">Change card</button>'}`;
@@ -718,7 +785,7 @@ async function searchCards() {
     box.innerHTML = shown.length ? shown.map(c => {
       const s = setById.get(setIdOf(c.id));
       return `<button type="button" class="result" data-card="${esc(c.id)}">
-        ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy">` : '<div class="ph">no image</div>'}
+        ${cardImg(c.id, c.image)}
         <b>${esc(c.name)}</b><span>${esc(s ? s.name : setIdOf(c.id))} · #${esc(c.localId)}</span></button>`;
     }).join('') + (cards.length > shown.length ? `<p class="note">Showing 150 of ${cards.length}. Pick a set to narrow it down.</p>` : '')
       : '<p class="note">No cards found. Check the spelling, or try just the Pokémon\'s name.</p>';
@@ -856,9 +923,7 @@ function renderDetail() {
   const it = items.find(i => i.id === detailId);
   if (!it) { detailDialog.close(); return; }
   const s = itemStats(it);
-  const img = $('#dImg');
-  img.hidden = !it.image;
-  if (it.image) img.src = it.image + '/high.webp';
+  setCardImg($('#dImg'), it.kind === 'card' ? it.cardId : '', it.image, true);
   $('#dName').textContent = it.name;
   $('#dMeta').textContent = [it.setName, it.number && '#' + it.number, it.rarity, versionText(it),
     it.category && `Category: ${it.category}`, s.qty > 1 && `Qty ${s.qty}`,
@@ -1503,7 +1568,7 @@ async function renderSetGrid() {
     const mark = state === 'owned' ? '✓' : state === 'wish' ? '♥' : '';
     const p = price(c), r = priceInfo[c.id]?.r;
     return `<div class="tile ${state}" data-card="${esc(c.id)}">
-      ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy">` : '<div class="ph">no image</div>'}
+      ${cardImg(c.id, c.image)}
       ${h?.qty > 1 ? `<span class="qty-badge">×${h.qty}</span>` : ''}
       <button class="mark" aria-label="Add ${esc(c.name)}">${mark}</button>
       <b>${esc(c.name)}</b><span>#${esc(c.localId)}${r ? ` · ${esc(r)}` : ''}</span>
@@ -1532,8 +1597,7 @@ async function openPick(cardId) {
   const set = await getSet(setIdOf(cardId)).catch(() => null);
   const brief = set?.cards?.find(c => c.id === cardId) || {};
   const h = holdings().get(cardId) || { qty: 0, wish: false, ids: [] };
-  $('#pkImg').hidden = !brief.image;
-  if (brief.image) $('#pkImg').src = brief.image + '/low.webp';
+  setCardImg($('#pkImg'), cardId, brief.image);
   $('#pkName').textContent = brief.name || cardId;
   $('#pkMeta').textContent = [set?.name, brief.localId && `#${brief.localId}`].filter(Boolean).join(' · ');
   $('#pkHave').textContent = [h.qty ? `✓ ${h.qty} in your collection` : '', h.wish ? '♥ On your wishlist' : ''].filter(Boolean).join(' · ');
@@ -1751,7 +1815,7 @@ async function matchScan(text, nameText = '') {
 function showScanResults(cards, note, warn = '', again = true) {
   const box = $('#results');
   box.innerHTML = cards.map(c => `<button type="button" class="result ${c.best ? 'best' : ''}" data-card="${esc(c.id)}">
-      ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy">` : '<div class="ph">no image</div>'}
+      ${cardImg(c.id, c.image)}
       <b>${esc(c.name)}</b><span>${esc(c.setName)} · #${esc(c.localId)}</span></button>`).join('');
   setScanStatus(note, warn, again);
 }
@@ -2345,7 +2409,7 @@ function renderBatch() {
     const opts = r.matches.map(m => `<option value="${esc(m.id)}" ${m.id === r.choice ? 'selected' : ''}>${esc(m.name)} — ${esc(m.setName)} #${esc(m.localId)}</option>`).join('');
     const chosen = r.matches.find(m => m.id === r.choice);
     return `<div class="batch-row ${r.status === 'pending' ? 'pending' : ''} ${r.status === 'fail' ? 'fail' : ''}" data-rid="${r.id}">
-      <img src="${chosen?.image ? esc(chosen.image) + '/low.webp' : r.thumb}" alt="">
+      ${chosen ? cardImg(chosen.id, chosen.image, { lazy: false }) : `<img src="${r.thumb}" alt="">`}
       <div class="who">${r.status === 'pending' ? '<b>Reading…</b>'
         : r.status === 'fail' ? '<b>Couldn\'t read this one</b><span class="muted small">Remove it and add it by hand.</span>'
         : `<b>${r.status === 'done' ? '✓ ' : '⚠ Check: '}${esc(chosen?.name || '')}</b><select data-pick>${opts}</select>`}</div>

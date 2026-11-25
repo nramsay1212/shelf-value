@@ -1,5 +1,5 @@
 // Shelf Value service worker: lets the app open offline and caches card images.
-const VERSION = 'v9';
+const VERSION = 'v10';
 const SHELL = `shelf-shell-${VERSION}`;
 const IMAGES = 'shelf-images';
 const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
@@ -30,7 +30,7 @@ self.addEventListener('fetch', e => {
   }
 
   // Card images rarely change: cache first.
-  if (url.hostname === 'assets.tcgdex.net') {
+  if (url.hostname === 'assets.tcgdex.net' || url.hostname === 'images.pokemontcg.io') {
     e.respondWith(caches.open(IMAGES).then(async c => {
       const hit = await c.match(req);
       if (hit) return hit;

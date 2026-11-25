@@ -453,3 +453,14 @@ dialog.pick { width: min(420px, 94vw); }
 @media (max-width: 640px) {
   #batchDialog .row > *, #saleForm .row > *, #subForm .row > * { flex: 1 1 calc(50% - 10px); }
 }
+
+/* ---------- Full-screen card picture ---------- */
+img[data-zoom] { cursor: zoom-in; }
+#dImg, #pkImg, .picked img { cursor: zoom-in; }
+#imgView { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: rgba(0, 0, 0, .92); display: none; }
+#imgView[open] { display: grid; place-items: center; }
+#imgView::backdrop { background: rgba(0, 0, 0, .92); }
+#imgViewImg { max-width: min(94vw, 700px); max-height: 86dvh; width: auto; height: auto; object-fit: contain; border-radius: 14px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .6); cursor: zoom-out; }
+.img-hint { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); left: 0; right: 0; margin: 0; text-align: center; color: rgba(255,255,255,.7); font-size: 13px; }
