@@ -459,7 +459,10 @@ const gradingCandidates = () => items.filter(it =>
 // Main view
 // =====================================================================
 // A notification tap opens ?view=wishlist
-let view = ['collection', 'wishlist', 'sets', 'grading', 'sold'].includes(new URLSearchParams(location.search).get('view')) ? new URLSearchParams(location.search).get('view') : 'collection';
+const urlView = new URLSearchParams(location.search).get('view');
+let view = ['collection', 'wishlist', 'grading', 'sold'].includes(urlView) ? urlView : 'collection';
+// Bottom bar page: Collection, Sets or Settings (the app always opens on Collection)
+let page = urlView === 'sets' ? 'sets' : 'collection';
 let rangeDays = 0;
 
 function statTile(label, value, extraClass = '') {
@@ -525,18 +528,14 @@ function render() {
   $('#typeFilter').hidden = view === 'grading';
   $('#sort').hidden = view === 'grading';
   $('#gradingSettings').hidden = view !== 'grading';
-  const sets = view === 'sets';
-  $('#setsView').hidden = !sets;
-  $('#listToolbar').hidden = sets;
-  $('.table-wrap').hidden = sets;
-
   // keep ✓ / ♥ marks in the card search up to date after adding something
   if (typeof csResults !== 'undefined' && csResults.length && !$('#cardSearchResults').hidden) renderCardSearch(csToken);
+  // the Sets page keeps its marks and progress up to date too
+  if (typeof page !== 'undefined' && page === 'sets') renderSetsView();
 
   $('#itemsTable').className = 'v-' + view;
   $('#viewExtra').hidden = true;
-  if (sets) renderSetsView();
-  else if (view === 'grading') renderGrading();
+  if (view === 'grading') renderGrading();
   else if (view === 'sold') renderSold();
   else renderList(view === 'collection' ? coll : wish);
 }
@@ -893,7 +892,7 @@ itemForm.addEventListener('submit', e => {
     if (wished) { items = items.filter(i => i !== wished); save(); toast(`✓ Added ${it.name} and took it off your wishlist`); }
     else toast(`✓ Added ${it.name} to your collection`);
   }
-  if (it.list !== view && view !== 'grading' && view !== 'sets') view = it.list;
+  if (it.list !== view && view !== 'grading' && page !== 'sets') view = it.list;
   render();
   if (detailId) renderDetail();
 });
@@ -1326,12 +1325,10 @@ $('#ebayRefresh').addEventListener('click', async () => {
   catch (err) { $('#ebayRanges').innerHTML = `<p class="error">Couldn't check eBay: ${esc(err.message)}</p>`; }
 });
 
-const settingsDialog = $('#settingsDialog');
-$('#settingsBtn').addEventListener('click', () => {
+function fillWorkerSetting() {
   $('#workerUrl').value = workerUrl();
   $('#workerStatus').textContent = workerUrl() ? 'Connected.' : 'Not set up yet.';
-  settingsDialog.showModal();
-});
+}
 $('#workerRemove').addEventListener('click', () => {
   localStorage.removeItem(WORKER_KEY);
   $('#workerUrl').value = '';
@@ -1402,7 +1399,7 @@ async function loadEras() {
 }
 
 // Kept for the code that runs at start-up.
-function fillBrowseSets() { if (view === 'sets') renderSetsView(); }
+function fillBrowseSets() { if (page === 'sets') renderSetsView(); }
 
 // What you have of each card: collection quantity and whether it's wishlisted.
 function holdings() {
@@ -1484,7 +1481,7 @@ $('#setListBody').addEventListener('click', e => {
 $('#setBack').addEventListener('click', () => {
   browseSetId = '';
   renderSetsView();
-  $('#viewTabs').scrollIntoView({ block: 'start' });
+  window.scrollTo({ top: 0 });
 });
 
 function openSet(id) {
@@ -1493,7 +1490,7 @@ function openSet(id) {
   $('#setCardSearch').value = '';
   $('#setGrid').innerHTML = '';
   renderSetsView();
-  $('#viewTabs').scrollIntoView({ block: 'start' });
+  window.scrollTo({ top: 0 });
   loadSetPrices(id);
 }
 
@@ -2246,7 +2243,6 @@ $('#syncOffBtn').addEventListener('click', () => {
   renderSyncSettings('Sync is off on this device.');
   updateSyncBadge();
 });
-$('#settingsBtn').addEventListener('click', () => renderSyncSettings());
 
 // Pull changes from other devices when the app opens, comes back to the front, and every minute while open.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
@@ -2358,7 +2354,6 @@ async function checkAlertsInApp() {
   } catch { /* offline */ }
 }
 
-$('#settingsBtn').addEventListener('click', () => { renderAlertsSetting(); storeSyncMeta(); });
 
 // =====================================================================
 // Search every card (top of the app): live results with pictures and prices
@@ -2626,7 +2621,7 @@ $('#batchAdd').addEventListener('click', async () => {
   save();
   rapid.results = [];
   $('#batchDialog').close();
-  if (view !== 'sets') view = list;
+  if (page !== 'sets') view = list;
   render();
   toast(`✓ Added ${added} card${added === 1 ? '' : 's'}${offWish ? ` (${offWish} taken off your wishlist)` : ''}. Tap any card to set its version or what you paid.`);
 });
@@ -2843,16 +2838,38 @@ function renderSaleBox(it) {
 }
 
 // =====================================================================
+// Bottom bar: Collection / Sets / Settings
+// =====================================================================
+function showPage(p, { scroll = true } = {}) {
+  page = p;
+  $('#pageCollection').hidden = p !== 'collection';
+  $('#pageSets').hidden = p !== 'sets';
+  $('#pageSettings').hidden = p !== 'settings';
+  $$('#bottomNav button').forEach(b => b.classList.toggle('on', b.dataset.page === p));
+  if (p === 'sets') renderSetsView();
+  if (p === 'settings') { renderSyncSettings(); fillWorkerSetting(); renderAlertsSetting(); storeSyncMeta(); }
+  if (p === 'collection') render();
+  if (scroll) window.scrollTo({ top: 0 });
+}
+$('#bottomNav').addEventListener('click', e => {
+  const b = e.target.closest('[data-page]');
+  if (!b) return;
+  // Tapping Sets again while inside a set goes back to the list of sets.
+  if (b.dataset.page === 'sets' && page === 'sets' && browseSetId) { browseSetId = ''; renderSetsView(); window.scrollTo({ top: 0 }); return; }
+  showPage(b.dataset.page);
+});
+
+// =====================================================================
 // Start
 // =====================================================================
-render();
+showPage(page, { scroll: false });
 updateRefreshStatus();
 updateSyncBadge();
 syncNow().then(checkAlertsInApp);
 storeSyncMeta();
 loadSets().then(() => {
   fillBrowseSets();
-  if (view === 'sets') renderSetsView();
+  if (page === 'sets') renderSetsView();
   const last = +localStorage.getItem(REFRESH_KEY);
   if (items.length && Date.now() - last > 12 * 36e5) refreshAll();
 });

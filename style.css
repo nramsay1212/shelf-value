@@ -489,3 +489,21 @@ img[data-zoom] { cursor: zoom-in; }
   .card-search { padding: 8px; }
   .card-search .cs-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 }
+
+/* ---------- Pages + bottom bar ---------- */
+main > .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+main > .page[hidden] { display: none; }
+.page-title { font-size: 22px; margin: 2px 0 12px; }
+.settings-page form { display: grid; gap: 12px; }
+.settings-page h3 { color: var(--text); text-transform: none; letter-spacing: 0; font-size: 15px; margin: 8px 0 0; }
+body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; justify-content: center;
+  background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+.bottom-nav button { flex: 1; max-width: 160px; border: 0; background: none; border-radius: 10px; padding: 6px 4px 4px;
+  display: grid; justify-items: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.bottom-nav button:hover { background: var(--row-hover); }
+.bottom-nav button.on { color: var(--accent); }
+.bottom-nav svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
+@media (min-width: 900px) { .bottom-nav button { flex-direction: row; } }

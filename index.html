@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=12">
+  <link rel="stylesheet" href="style.css?v=13">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -18,13 +18,14 @@
   <header class="top">
     <div class="top-right">
       <span id="syncBadge" class="sync-badge" hidden></span>
-      <button id="settingsBtn">&#9881; Settings</button>
     </div>
     <h1>Shelf Value</h1>
     <p class="sub">Pokémon card collection tracker with free, automatic TCGplayer market prices.</p>
   </header>
 
   <main>
+  <!-- ===== Collection page ===== -->
+  <div id="pageCollection" class="page">
     <!-- Search every card -->
     <section class="search-bar">
       <div class="search-row">
@@ -64,49 +65,11 @@
       <div class="tabs views" id="viewTabs">
         <button data-view="collection" class="on">Collection</button>
         <button data-view="wishlist">Wishlist</button>
-        <button data-view="sets">Sets</button>
         <button data-view="grading">Grading</button>
         <button data-view="sold">Sold</button>
       </div>
 
-      <div id="setsView" hidden>
-        <!-- all sets -->
-        <div id="setList">
-          <div class="toolbar">
-            <input id="setSearch" type="search" placeholder="Search sets… (e.g. 151, Surging Sparks, Base)">
-            <label class="check"><input type="checkbox" id="setMineOnly"> Only sets I collect</label>
-            <span class="spacer"></span>
-            <button class="scanBtn">&#128247; Scan a card</button>
-            <button class="rapidBtn">&#9889; Rapid scan</button>
-          </div>
-          <div id="setListBody"></div>
-        </div>
-        <!-- one set -->
-        <div id="setDetail" hidden>
-          <div class="set-head">
-            <button id="setBack">&#8592; All sets</button>
-            <img id="setLogo" alt="">
-            <div class="grow"><h2 id="setTitle"></h2><p id="setSub" class="muted small"></p></div>
-          </div>
-          <div id="setProgress" class="set-progress"></div>
-          <div class="toolbar">
-            <input id="setCardSearch" type="search" placeholder="Search this set…">
-            <div class="chips" id="setChips">
-              <button data-f="all" class="on">All</button><button data-f="missing">Missing</button>
-              <button data-f="owned">Owned</button><button data-f="wish">Wishlist</button>
-            </div>
-            <select id="setSort" aria-label="Sort">
-              <option value="num">Card number</option>
-              <option value="price-desc">Price: high to low</option>
-              <option value="price-asc">Price: low to high</option>
-              <option value="name">Name A to Z</option>
-              <option value="rarity">Rarity</option>
-            </select>
-          </div>
-          <p id="setPriceStatus" class="muted small"></p>
-          <div id="setGrid" class="set-grid"></div>
-        </div>
-      </div>
+
 
       <div class="toolbar" id="listToolbar">
         <input id="search" type="search" placeholder="Search...">
@@ -160,11 +123,128 @@
       </div>
     </section>
 
+  </div><!-- /pageCollection -->
+
+  <!-- ===== Sets page ===== -->
+  <div id="pageSets" class="page" hidden>
+    <section class="card">
+      <h2 class="page-title">Sets</h2>
+
+      <div id="setsView">
+        <!-- all sets -->
+        <div id="setList">
+          <div class="toolbar">
+            <input id="setSearch" type="search" placeholder="Search sets… (e.g. 151, Surging Sparks, Base)">
+            <label class="check"><input type="checkbox" id="setMineOnly"> Only sets I collect</label>
+            <span class="spacer"></span>
+            <button class="scanBtn">&#128247; Scan a card</button>
+            <button class="rapidBtn">&#9889; Rapid scan</button>
+          </div>
+          <div id="setListBody"></div>
+        </div>
+        <!-- one set -->
+        <div id="setDetail" hidden>
+          <div class="set-head">
+            <button id="setBack">&#8592; All sets</button>
+            <img id="setLogo" alt="">
+            <div class="grow"><h2 id="setTitle"></h2><p id="setSub" class="muted small"></p></div>
+          </div>
+          <div id="setProgress" class="set-progress"></div>
+          <div class="toolbar">
+            <input id="setCardSearch" type="search" placeholder="Search this set…">
+            <div class="chips" id="setChips">
+              <button data-f="all" class="on">All</button><button data-f="missing">Missing</button>
+              <button data-f="owned">Owned</button><button data-f="wish">Wishlist</button>
+            </div>
+            <select id="setSort" aria-label="Sort">
+              <option value="num">Card number</option>
+              <option value="price-desc">Price: high to low</option>
+              <option value="price-asc">Price: low to high</option>
+              <option value="name">Name A to Z</option>
+              <option value="rarity">Rarity</option>
+            </select>
+          </div>
+          <p id="setPriceStatus" class="muted small"></p>
+          <div id="setGrid" class="set-grid"></div>
+        </div>
+      </div>
+      
+    </section>
+  </div>
+
+  <!-- ===== Settings page ===== -->
+  <div id="pageSettings" class="page" hidden>
+    <section class="card settings-page">
+      <h2 class="page-title">Settings</h2>
+
+  
+    <form id="settingsForm">
+      <section class="sync-box">
+        <h3>&#9729; Back up &amp; sync</h3>
+        <div id="syncOff">
+          <p class="muted small">Keep your collection safe in the cloud and the same on all your devices.</p>
+          <label>Invite code <input id="syncInvite" autocomplete="off" spellcheck="false" placeholder="from the person who set up Shelf Value"></label>
+          <button type="button" id="syncCreate" class="primary">Turn on sync (new collection)</button>
+          <p class="muted small or">— or, on your other device —</p>
+          <label>Your sync code <input id="syncJoinCode" autocomplete="off" spellcheck="false" placeholder="e.g. teal-moon-quartz-otter-4821"></label>
+          <button type="button" id="syncJoin">Connect this device</button>
+        </div>
+        <div id="syncOn" hidden>
+          <p class="small">Sync is on. Your sync code:</p>
+          <div class="code-row"><code id="syncCodeShow"></code><button type="button" id="syncCopy" class="small-btn">Copy</button></div>
+          <p class="muted small">Enter this code on your other devices to see the same collection. Keep it private, like a password.</p>
+          <div class="row">
+            <button type="button" id="syncNow">Sync now</button>
+            <button type="button" id="syncOffBtn" class="danger">Turn off on this device</button>
+          </div>
+          <h3>&#128276; Wishlist price alerts</h3>
+          <p class="muted small">Get a notification on this device when a wishlist card drops to your target price.
+            Prices are checked once a day, even when the app is closed.</p>
+          <p id="alertsHint" class="muted small" hidden></p>
+          <button type="button" id="alertsBtn">Turn on price alerts</button>
+          <button type="button" id="alertsTest" hidden>Send a test notification</button>
+        </div>
+        <p id="syncMsg" class="small"></p>
+      </section>
+      <h3>eBay prices</h3>
+      <p class="muted small">For graded (PSA/CGC/BGS), raw and sealed price ranges from current eBay listings,
+        paste the address of your eBay price worker (see the README on GitHub for the 10-minute free setup).
+        It's saved only in this browser.</p>
+      <label>eBay price worker address
+        <input id="workerUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://shelf-value-ebay.yourname.workers.dev">
+      </label>
+      <p id="workerStatus" class="muted small"></p>
+      <div class="actions">
+        <button type="button" id="workerRemove" class="danger">Remove</button>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Save &amp; test</button>
+      </div>
+    </form>
+  
+    </section>
+  </div>
+
     <footer class="foot">
       Card data, images and prices from <a href="https://tcgdex.dev" target="_blank" rel="noopener">TCGdex</a> (TCGplayer market prices, USD).
       Not affiliated with Nintendo, The Pokémon Company, TCGplayer, or any grading company.
     </footer>
   </main>
+
+  <!-- Bottom bar -->
+  <nav class="bottom-nav" id="bottomNav" aria-label="Sections">
+    <button data-page="collection" class="on">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="11" height="15" rx="2"/><path d="M9 21h9a2 2 0 0 0 2-2V8"/></svg>
+      <span>Collection</span>
+    </button>
+    <button data-page="sets">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>Sets</span>
+    </button>
+    <button data-page="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
 
   <!-- Add / edit -->
   <dialog id="itemDialog" class="wide">
@@ -439,58 +519,10 @@
     <p class="img-hint">Tap anywhere to close · pinch to zoom</p>
   </dialog>
 
-  <!-- Settings -->
-  <dialog id="settingsDialog">
-    <form id="settingsForm">
-      <div class="detail-head">
-        <h2>Settings</h2>
-        <button type="button" data-close class="icon" aria-label="Close">&#10005;</button>
-      </div>
-      <section class="sync-box">
-        <h3>&#9729; Back up &amp; sync</h3>
-        <div id="syncOff">
-          <p class="muted small">Keep your collection safe in the cloud and the same on all your devices.</p>
-          <label>Invite code <input id="syncInvite" autocomplete="off" spellcheck="false" placeholder="from the person who set up Shelf Value"></label>
-          <button type="button" id="syncCreate" class="primary">Turn on sync (new collection)</button>
-          <p class="muted small or">— or, on your other device —</p>
-          <label>Your sync code <input id="syncJoinCode" autocomplete="off" spellcheck="false" placeholder="e.g. teal-moon-quartz-otter-4821"></label>
-          <button type="button" id="syncJoin">Connect this device</button>
-        </div>
-        <div id="syncOn" hidden>
-          <p class="small">Sync is on. Your sync code:</p>
-          <div class="code-row"><code id="syncCodeShow"></code><button type="button" id="syncCopy" class="small-btn">Copy</button></div>
-          <p class="muted small">Enter this code on your other devices to see the same collection. Keep it private, like a password.</p>
-          <div class="row">
-            <button type="button" id="syncNow">Sync now</button>
-            <button type="button" id="syncOffBtn" class="danger">Turn off on this device</button>
-          </div>
-          <h3>&#128276; Wishlist price alerts</h3>
-          <p class="muted small">Get a notification on this device when a wishlist card drops to your target price.
-            Prices are checked once a day, even when the app is closed.</p>
-          <p id="alertsHint" class="muted small" hidden></p>
-          <button type="button" id="alertsBtn">Turn on price alerts</button>
-          <button type="button" id="alertsTest" hidden>Send a test notification</button>
-        </div>
-        <p id="syncMsg" class="small"></p>
-      </section>
-      <h3>eBay prices</h3>
-      <p class="muted small">For graded (PSA/CGC/BGS), raw and sealed price ranges from current eBay listings,
-        paste the address of your eBay price worker (see the README on GitHub for the 10-minute free setup).
-        It's saved only in this browser.</p>
-      <label>eBay price worker address
-        <input id="workerUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://shelf-value-ebay.yourname.workers.dev">
-      </label>
-      <p id="workerStatus" class="muted small"></p>
-      <div class="actions">
-        <button type="button" id="workerRemove" class="danger">Remove</button>
-        <span class="spacer"></span>
-        <button type="submit" class="primary">Save &amp; test</button>
-      </div>
-    </form>
-  </dialog>
+
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.
