@@ -81,7 +81,7 @@ function variantLabel(key) {
     .replace('Holofoil', 'Holo');
 }
 const isGraded = it => it.condition === 'Graded';
-const isAutoPriced = it => it.kind === 'card' && it.cardId && !isGraded(it);
+const isAutoPriced = it => it.kind === 'card' && it.cardId && !isGraded(it) && !isCustomCard(it.cardId);
 const sortedPrices = it => [...(it.prices || [])].sort((a, b) => a.date.localeCompare(b.date));
 
 function versionText(it) {
@@ -137,6 +137,7 @@ async function loadSets() {
     } catch { sets = cached?.data || []; }
   }
   sets.forEach((s, i) => { setById.set(s.id, s); setOrder.set(s.id, i); });
+  Object.values(CUSTOM_SETS).forEach(s => setById.set(s.id, { id: s.id, name: s.name, official: s.cards.length }));
   const opts = [...sets].reverse().map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   $('#setSelect').innerHTML = '<option value="">Any set</option>' + opts;
   itemForm.elements.sealedSet.innerHTML = '<option value="">None</option>' + opts;
@@ -156,6 +157,7 @@ const PTCG_SETS = {
 const ptcgSet = id => PTCG_SETS[id] || id.replace(/\.5/, 'pt5').replace(/^([a-z]+)0+(\d)/, '$1$2');
 
 function cardImageUrls(cardId, image, hi = false) {
+  if (isCustomCard(cardId)) return image ? [image] : [];
   const urls = [];
   if (image) urls.push(`${image}/${hi ? 'high' : 'low'}.webp`);
   if (cardId && cardId.includes('-')) {
@@ -213,7 +215,150 @@ document.addEventListener('click', e => {
 // Pokémon TCG Pocket (the phone game) sets: A1, A2b, B1a, P-A ... not physical cards.
 const isPocket = setId => /^([AB]\d+[a-z]?|P-[AB])$/.test(setId);
 
+// ---------------------------------------------------------------------
+// Other collectibles: sets that aren't in the card database, built in here.
+// They have no automatic prices or pictures; you enter the value yourself.
+const HANAFUDA_NAMES = [
+  'Blastoise (January)',
+  'Dragonite, Gyarados (January)',
+  'Mario Pikachu, Qwilfish (January)',
+  'Meowth, Tauros (January)',
+  'Moltres (January)',
+  'Psyduck (January)',
+  'Tropius (January)',
+  'Venusaur (January)',
+  'Chansey, Lickitung (February)',
+  'Charizard (February)',
+  'Farfetch’d (February)',
+  'Flabébé (February)',
+  'Golem, Weezing (February)',
+  'Hitmonchan, Hitmonlee (February)',
+  'Natu (February)',
+  'Vileplume (February)',
+  'Articuno (March)',
+  'Blastoise (March)',
+  'Cherrim (March)',
+  'Cherrim, Wartortle (March)',
+  'Jigglypuff, Kangaskhan (March)',
+  'Luigi Pikachu (March)',
+  'Nidoran ♀, Nidoran ♂ (March)',
+  'Raticate, Rattata (March)',
+  'Aerodactyl (April)',
+  'Burmy (April)',
+  'Foongus (April)',
+  'Greninja (April)',
+  'Landorus (April)',
+  'Magmar, Pinsir (April)',
+  'Ninetales, Persian (April)',
+  'Pidgeot, Pidgey (April)',
+  'Arbok, Slowpoke (May)',
+  'Carnivine, Hoppip (May)',
+  'Ditto, Oddish, Psyduck (May)',
+  'Goomy, Noibat (May)',
+  'Grimer, Porygon (May)',
+  'Inkay, Poliwag (May)',
+  'Jynx (May)',
+  'Serperior (May)',
+  'Beautifly (June)',
+  'Blaziken (June)',
+  'Butterfree, Vileplume (June)',
+  'Goldeen, Seaking (June)',
+  'Kingler, Venonat, Venusaur (June)',
+  'Paras, Parasect (June)',
+  'Roselia (June)',
+  'Roserade (June)',
+  'Arcanine, Primeape (July)',
+  'Electabuzz, Scyther (July)',
+  'Exeggcute, Rhyhorn (July)',
+  'Jirachi, Swampert (July)',
+  'Kabuto, Omanyte (July)',
+  'Piloswine, Swinub (July)',
+  'Sceptile (July)',
+  'Squirtle (July)',
+  'Clefable, Clefairy, Cubone (August)',
+  'Diglett, Dugtrio, Voltorb (August)',
+  'Electrode, Geodude, Machamp, Onix (August)',
+  'Fearow, Snorlax, Spearow (August)',
+  'Ferroseed (August)',
+  'Mario Pikachu (August)',
+  'Pidgeot, Pidgeotto (August)',
+  'Shroomish (August)',
+  'Beedrill, Weedle (September)',
+  'Dewgong, Lapras (September)',
+  'Fennekin (September)',
+  'Magnemite, Sandslash (September)',
+  'Meganium (September)',
+  'Pikachu, Zapdos (September)',
+  'Pyroar (September)',
+  'Qwilfish (September)',
+  'Braixen (October)',
+  'Cloyster, Tentacruel (October)',
+  'Deerling (October)',
+  'Dodrio, Gengar, Seadra (October)',
+  'Ponyta, Rapidash (October)',
+  'Starmie, Staryu (October)',
+  'Typhlosion (October)',
+  'Volcarona (October)',
+  'Abra, Drowzee, Gastly (November)',
+  'Exeggutor, Mr. Mime, Poliwag (November)',
+  'Feraligatr (November)',
+  'Froakie, Taillow (November)',
+  'Jolteon (November)',
+  'Luigi Pikachu, Slowpoke (November)',
+  'Tangela (November)',
+  'Victreebel, Zubat (November)',
+  'Bulbasaur, Charmander, Squirtle (December)',
+  'Charizard (December)',
+  'Eevee, Flareon, Jolteon, Vaporeon (December)',
+  'Ho-Oh, Mario Pikachu (December)',
+  'Luigi Pikachu (December)',
+  'Mario Pikachu (December)',
+  'Mew, Mewtwo (December)',
+  'Pikachu (December)',
+];
+const CUSTOM_SETS = {
+  hanafuda: {
+    id: 'hanafuda', name: 'Pokémon Hanafuda', serie: { name: 'Other collectibles' },
+    note: 'Japanese Pokémon hanafuda cards from Nintendo, grouped by month. No automatic prices: enter what yours are worth.',
+    cards: HANAFUDA_NAMES.map((name, i) => ({ id: `hanafuda-${String(i + 1).padStart(2, '0')}`, localId: String(i + 1).padStart(2, '0'), name })),
+  },
+};
+Object.values(CUSTOM_SETS).forEach(s => { s.cardCount = { official: s.cards.length, total: s.cards.length }; });
+const isCustomCard = cardId => !!cardId && setIdOf(cardId) in CUSTOM_SETS;
+const OTHER_ERA = { id: 'other', name: 'Other collectibles', custom: true,
+  sets: Object.values(CUSTOM_SETS).map(s => ({ id: s.id, name: s.name, logo: '', official: s.cards.length, total: s.cards.length })) };
+
+// Cards from built-in sets whose name (or set name) has every word you typed.
+function customMatches(q) {
+  const words = String(q || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const plain = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return Object.values(CUSTOM_SETS).flatMap(s => s.cards.filter(c => {
+    const hay = plain(`${c.name} ${s.name} ${s.id}`);
+    return words.every(w => hay.includes(w));
+  }));
+}
+
+// Your own latest value for each card of a built-in set.
+function customSetPrices(setId) {
+  const out = {};
+  items.forEach(it => {
+    if (!it.cardId || setIdOf(it.cardId) !== setId || it.list === 'sold') return;
+    const last = sortedPrices(it).pop();
+    if (last && (out[it.cardId]?.p == null || it.list === 'collection')) out[it.cardId] = { p: last.price, r: '' };
+  });
+  return out;
+}
+
+function customCard(id) {
+  const s = CUSTOM_SETS[setIdOf(id)];
+  const c = s && s.cards.find(x => x.id === id);
+  if (!c) throw new Error('Card not found');
+  return { ...c, set: { id: s.id, name: s.name }, rarity: '', pricing: {} };
+}
+
 async function getCard(id) {
+  if (isCustomCard(id)) return customCard(id);
   if (cardCache.has(id)) return cardCache.get(id);
   const card = await getJSON(`${API}/cards/${encodeURIComponent(id)}`);
   cardCache.set(id, card);
@@ -777,7 +922,7 @@ async function searchCards() {
   try {
     let cards;
     if (q) {
-      cards = (await getJSON(`${API}/cards?name=${encodeURIComponent(q)}`)).filter(c => !isPocket(setIdOf(c.id)));
+      cards = (await getJSON(`${API}/cards?name=${encodeURIComponent(q)}`)).filter(c => !isPocket(setIdOf(c.id))).concat(customMatches(q));
       if (setId) cards = cards.filter(c => setIdOf(c.id) === setId);
     } else {
       cards = (await getJSON(`${API}/sets/${encodeURIComponent(setId)}`)).cards || [];
@@ -1008,6 +1153,7 @@ function ebayUrl(q) {
   return 'https://www.ebay.com/sch/i.html?LH_Sold=1&LH_Complete=1&_nkw=' + encodeURIComponent(q);
 }
 function searchName(it) {
+  if (isCustomCard(it.cardId)) return `pokemon ${setIdOf(it.cardId)} ${it.name.replace(/[(),]/g, ' ')}`.replace(/\s+/g, ' ').trim();
   return it.kind === 'card' ? [it.name, it.number].filter(Boolean).join(' ') : [it.setName, it.name].filter(Boolean).join(' ');
 }
 
@@ -1467,6 +1613,7 @@ let eras = [];                 // [{ id, name, sets: [{ id, name, logo, official
 const setCache = new Map();
 
 async function getSet(id) {
+  if (CUSTOM_SETS[id]) return CUSTOM_SETS[id];
   if (!setCache.has(id)) setCache.set(id, getJSON(`${API}/sets/${encodeURIComponent(id)}`).catch(err => { setCache.delete(id); throw err; }));
   return setCache.get(id);
 }
@@ -1522,7 +1669,7 @@ async function renderSetList() {
   holdings().forEach((h, cardId) => { if (h.qty) { const s = setIdOf(cardId); ownedPerSet.set(s, (ownedPerSet.get(s) || 0) + 1); } });
   // Which eras are open: what you chose before, else the newest era and any era you collect from.
   const saved = readJSON(ERA_OPEN_KEY, null);
-  const html = eras.map((e, i) => {
+  const html = [...eras, OTHER_ERA].map((e, i) => {
     const list = [...e.sets].reverse().filter(s =>
       (!q || s.name.toLowerCase().includes(q) || e.name.toLowerCase().includes(q) || s.id.toLowerCase() === q) &&
       (!mineOnly || ownedPerSet.get(s.id)));
@@ -1591,6 +1738,7 @@ const setPrices = new Map(); // setId -> { t, prices: { cardId: { p, r } } }
 let pricesLoading = null;
 
 async function loadSetPrices(id) {
+  if (CUSTOM_SETS[id]) { renderSetGrid(); return; }
   let entry = setPrices.get(id) || readJSON(SET_PRICES_KEY + id, null);
   if (entry && Date.now() - entry.t < 864e5) { setPrices.set(id, entry); renderSetGrid(); return; }
   if (pricesLoading === id) return;
@@ -1647,16 +1795,17 @@ async function renderSetGrid() {
   $('#setTitle').textContent = set.name;
   $('#setSub').textContent = [set.serie?.name, set.releaseDate && `Released ${fmtDate(set.releaseDate)}`,
     `${set.cardCount?.official || ''} cards${set.cardCount?.total > set.cardCount?.official ? ` + ${set.cardCount.total - set.cardCount.official} secret` : ''}`]
-    .filter(Boolean).join(' · ');
+    .filter(Boolean).join(' · ') + (set.note ? `. ${set.note}` : '');
 
   const have = holdings();
   const cards = set.cards || [];
-  const priceInfo = setPrices.get(browseSetId)?.prices || {};
+  // Built-in sets have no market prices: show the value you entered for each card you own.
+  const priceInfo = CUSTOM_SETS[browseSetId] ? customSetPrices(browseSetId) : (setPrices.get(browseSetId)?.prices || {});
   const ownedCount = cards.filter(c => have.get(c.id)?.qty).length;
   const wishCount = cards.filter(c => have.get(c.id)?.wish).length;
   const value = items.filter(it => it.list === 'collection' && it.cardId && setIdOf(it.cardId) === browseSetId)
     .reduce((a, it) => a + itemStats(it).value, 0);
-  const setTotal = cards.reduce((a, c) => a + (priceInfo[c.id]?.p || 0), 0);
+  const setTotal = CUSTOM_SETS[browseSetId] ? 0 : cards.reduce((a, c) => a + (priceInfo[c.id]?.p || 0), 0);
   const pctOwned = cards.length ? ownedCount / cards.length * 100 : 0;
   prog.innerHTML = `<b>${ownedCount} / ${cards.length}</b> owned (${pctOwned.toFixed(0)}%)
     <div class="meter"><span style="width:${pctOwned}%"></span></div>
@@ -2458,7 +2607,7 @@ async function cardsByName(name) {
   const key = name.toLowerCase();
   if (!nameSearchCache.has(key)) {
     nameSearchCache.set(key, getJSON(`${API}/cards?name=${encodeURIComponent(name)}`)
-      .then(list => list.filter(c => !isPocket(setIdOf(c.id))))
+      .then(list => list.filter(c => !isPocket(setIdOf(c.id))).concat(customMatches(name)))
       .catch(err => { nameSearchCache.delete(key); throw err; }));
   }
   return nameSearchCache.get(key);
