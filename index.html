@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=14">
+  <link rel="stylesheet" href="style.css?v=15">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -272,6 +272,10 @@
           <button type="button" id="searchBtn" class="primary">Search</button>
           <button type="button" class="scanBtn">&#128247; Scan</button>
         </div>
+        <div class="row inline psa-row">
+          <label class="grow">PSA slab? Cert number <input id="psaCert" inputmode="numeric" autocomplete="off" placeholder="e.g. 81234567"></label>
+          <button type="button" id="psaLookup">Look up</button>
+        </div>
         <p id="scanStatus" class="muted small" hidden></p>
         <div id="results" class="results"></div>
       </div>
@@ -304,7 +308,9 @@
             <select name="grader"><option>PSA</option><option>CGC</option><option>BGS</option><option>TAG</option><option>ACE</option><option>Other</option></select>
           </label>
           <label class="gradeField">Grade <input name="grade" placeholder="e.g. 10"></label>
+          <label class="gradeField">Cert # <input name="cert" inputmode="numeric" autocomplete="off" placeholder="optional"></label>
         </div>
+        <p id="psaInfo" class="muted small" hidden></p>
       </div>
 
       <div class="row">
@@ -522,7 +528,7 @@
 
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.

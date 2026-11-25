@@ -17,6 +17,10 @@
 //
 // Collection sync also lives here: bind a KV namespace as SYNC and add an
 // INVITE_CODE secret (people need it once to turn sync on).
+//
+// PSA cert lookup: add a Secret PSA_TOKEN (free key from psacard.com/publicapi,
+// 100 lookups a day). Only people with a sync code can use it, and each cert is
+// remembered for 30 days so repeat lookups don't use the daily allowance.
 
 const DEFAULT_ORIGINS = 'https://nramsay1212.github.io,http://localhost:8080';
 const CACHE_SECONDS = 12 * 60 * 60;
@@ -261,6 +265,52 @@ async function sendPushes(env, hash, detailed = false) {
   return detailed ? { sent, errors } : sent;
 }
 
+// ---------------------------------------------------------------------------
+// PSA cert lookup
+async function handlePsa(req, env, url, cors) {
+  if (!env.PSA_TOKEN) return json({ error: 'The PSA key is not set up on the worker yet (secret PSA_TOKEN)' }, 503, cors);
+  if (!env.SYNC) return json({ error: 'Sync storage is not set up on this worker' }, 503, cors);
+  const code = req.headers.get('X-Sync-Code') || '';
+  if (code.trim().length < 12 || !(await env.SYNC.get(await syncKey(code)))) {
+    return json({ error: 'Turn on Back up & sync in Settings to use PSA lookup' }, 403, cors);
+  }
+  const cert = (url.searchParams.get('cert') || '').replace(/\D/g, '');
+  if (cert.length < 5 || cert.length > 12) return json({ error: "That doesn't look like a PSA cert number" }, 400, cors);
+
+  const cacheKey = 'psa:' + cert;
+  const cached = await env.SYNC.get(cacheKey, 'json');
+  if (cached && !url.searchParams.has('fresh')) return json({ ...cached, cached: true }, 200, cors);
+
+  const r = await fetch(`https://api.psacard.com/publicapi/cert/GetByCertNumber/${cert}`, {
+    headers: { Authorization: 'bearer ' + env.PSA_TOKEN.trim(), Accept: 'application/json' },
+  });
+  if (r.status === 429) return json({ error: "PSA's daily limit (100 lookups) is used up. Try again tomorrow." }, 429, cors);
+  if (r.status === 401 || r.status === 403) return json({ error: 'PSA did not accept the key. Make a new one at psacard.com/publicapi and update PSA_TOKEN.' }, 502, cors);
+  if (!r.ok) return json({ error: `PSA returned ${r.status}` }, 502, cors);
+  const data = await r.json().catch(() => null);
+  const c = data && data.PSACert;
+  if (!c || !c.CertNumber) return json({ error: 'PSA has no card with that cert number' }, 404, cors);
+
+  const num = v => (v === undefined || v === null || v === '' ? null : Number(v));
+  const out = {
+    cert: String(c.CertNumber),
+    year: c.Year || '',
+    brand: c.Brand || '',          // usually the set, e.g. "POKEMON SWORD & SHIELD EVOLVING SKIES"
+    category: c.Category || '',
+    number: c.CardNumber || '',
+    subject: c.Subject || '',      // the card name, e.g. "UMBREON VMAX"
+    variety: c.Variety || '',      // e.g. "ALTERNATE ART SECRET"
+    grade: c.CardGrade || '',      // e.g. "GEM MT 10"
+    gradeText: c.GradeDescription || '',
+    labelType: c.LabelType || '',
+    population: num(c.TotalPopulation),
+    populationHigher: num(c.PopulationHigher),
+    checkedAt: Date.now(),
+  };
+  await env.SYNC.put(cacheKey, JSON.stringify(out), { expirationTtl: 30 * 24 * 60 * 60 });
+  return json(out, 200, cors);
+}
+
 function json(body, status, headers) {
   return new Response(JSON.stringify(body), { status, headers: { ...headers, 'Content-Type': 'application/json' } });
 }
@@ -282,6 +332,10 @@ export default {
       if (origin && !allowed.includes(origin)) return json({ error: 'Origin not allowed' }, 403, cors);
       return handleSync(req, env, url, cors);
     }
+    if (url.pathname === '/psa/cert' && req.method === 'GET') {
+      if (origin && !allowed.includes(origin)) return json({ error: 'Origin not allowed' }, 403, cors);
+      return handlePsa(req, env, url, cors);
+    }
     // Manual run of the daily job (for testing); needs the invite code.
     if (url.pathname === '/admin/run-daily' && req.method === 'POST') {
       if (!env.SYNC || !env.INVITE_CODE || req.headers.get('X-Admin') !== env.INVITE_CODE) return json({ error: 'Not allowed' }, 403, cors);
@@ -289,7 +343,7 @@ export default {
     }
     if (url.pathname !== '/search') {
       return json({ ok: true, service: 'shelf-value-ebay', keysSet: !!(env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET),
-        sync: !!env.SYNC, vapidPublicKey: env.VAPID_PUBLIC || null }, 200, cors);
+        sync: !!env.SYNC, psa: !!env.PSA_TOKEN, vapidPublicKey: env.VAPID_PUBLIC || null }, 200, cors);
     }
     if (origin && !allowed.includes(origin)) return json({ error: 'Origin not allowed' }, 403, cors);
 

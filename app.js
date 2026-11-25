@@ -682,7 +682,7 @@ $('#viewExtra').addEventListener('click', e => {
 $$('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
 
 const itemDialog = $('#itemDialog'), itemForm = $('#itemForm');
-let editingId = null, formList = 'collection', formKind = 'card', picked = null, pickedOpts = [];
+let editingId = null, formList = 'collection', formKind = 'card', picked = null, pickedOpts = [], psaPending = null;
 
 function syncForm() {
   const f = itemForm.elements;
@@ -723,7 +723,8 @@ $('#picked').addEventListener('click', e => {
 async function openItemForm(id = null, list = view === 'wishlist' ? 'wishlist' : 'collection') {
   editingId = id;
   itemForm.reset();
-  picked = null; pickedOpts = [];
+  picked = null; pickedOpts = []; psaPending = null;
+  $('#psaInfo').hidden = true;
   const it = id && items.find(i => i.id === id);
   $('#itemDialogTitle').textContent = it ? 'Edit' : 'Add';
   $('#results').innerHTML = '';
@@ -731,7 +732,7 @@ async function openItemForm(id = null, list = view === 'wishlist' ? 'wishlist' :
   formKind = it ? (it.kind === 'card' ? 'card' : 'sealed') : 'card';
   const f = itemForm.elements;
   if (it) {
-    ['condition', 'grader', 'grade', 'category', 'qty', 'paid', 'acquired', 'target', 'notes']
+    ['condition', 'grader', 'grade', 'cert', 'category', 'qty', 'paid', 'acquired', 'target', 'notes']
       .forEach(k => { if (f[k]) f[k].value = it[k] ?? ''; });
     if (it.kind === 'card') {
       picked = { cardId: it.cardId, name: it.name, setName: it.setName, number: it.number, rarity: it.rarity, image: it.image };
@@ -814,8 +815,93 @@ async function selectCard(cardId) {
   picked = cardIdentity(card);
   pickedOpts = priceOptions(card);
   showPicked();
+  if (psaPending) applyPsa(psaPending);
   syncForm();
 }
+
+// ---------------------------------------------------------------------
+// PSA cert lookup: type the number on a PSA slab, the card and grade fill in.
+function psaGradeNumber(text) {
+  const m = String(text || '').match(/(\d+(?:\.5)?)\s*$/) || String(text || '').match(/(\d+(?:\.5)?)/);
+  return m ? m[1] : '';
+}
+
+function applyPsa(p) {
+  const f = itemForm.elements;
+  f.condition.value = 'Graded';
+  f.grader.value = 'PSA';
+  f.grade.value = psaGradeNumber(p.grade) || p.grade || '';
+  f.cert.value = p.cert;
+  const v = (p.variety || '').toLowerCase();
+  const want = /rev/.test(v) ? 'reverse' : /1st|first/.test(v) ? '1st' : /holo/.test(v) ? 'holo' : '';
+  if (want) {
+    const opt = [...f.variant.options].find(o => o.value.toLowerCase().includes(want));
+    if (opt) f.variant.value = opt.value;
+  }
+  const pop = p.population != null
+    ? ` · PSA population: ${p.population} at this grade${p.populationHigher != null ? `, ${p.populationHigher} higher` : ''}` : '';
+  $('#psaInfo').textContent = `PSA says: ${[p.year, p.subject, p.variety, '#' + p.number, p.grade].filter(Boolean).join(' · ')}${pop}`;
+  $('#psaInfo').hidden = false;
+}
+
+// PSA names look like "FA/CHARIZARD EX" or "PIKACHU-HOLO"; turn that into a searchable name.
+function psaCardName(subject) {
+  return String(subject || '')
+    .replace(/^[A-Z]{1,4}\//, '')
+    .replace(/-(REV\.?\s*FOIL|REVERSE\s*HOLO|HOLO|1ST\s*ED.*|FULL\s*ART.*)$/i, '')
+    .replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+async function psaLookup() {
+  const box = $('#results');
+  const cert = $('#psaCert').value.replace(/\D/g, '');
+  if (!cert) { box.innerHTML = '<p class="note">Type the cert number from the PSA label.</p>'; return; }
+  if (!syncCode()) { box.innerHTML = '<p class="note">PSA lookup needs Back up &amp; sync turned on (Settings tab).</p>'; return; }
+  box.innerHTML = '<p class="note">Asking PSA…</p>';
+  let p;
+  try {
+    const r = await fetch(`${syncUrl()}/psa/cert?cert=${cert}`, { headers: { 'X-Sync-Code': syncCode() } });
+    p = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(p.error || `error ${r.status}`);
+  } catch (err) {
+    box.innerHTML = `<p class="note">${esc(err.message)}</p>`;
+    return;
+  }
+  psaPending = p;
+  const label = [p.year, p.brand, p.subject, p.variety, '#' + p.number, 'PSA ' + p.grade].filter(Boolean).join(' · ');
+  box.innerHTML = `<p class="note">Found: ${esc(label)}. Matching the card…</p>`;
+
+  const name = psaCardName(p.subject);
+  const numWant = String(p.number || '').replace(/^0+(?=\w)/, '').toLowerCase();
+  let cards = [];
+  try { cards = await cardsByName(name); } catch {}
+  if (!cards.length && name.includes(' ')) {
+    try { cards = await cardsByName(name.split(' ')[0]); } catch {}
+  }
+  const sameNum = c => String(c.localId).replace(/^0+(?=\w)/, '').toLowerCase() === numWant;
+  let hits = numWant ? cards.filter(sameNum) : cards;
+  // Rank by how many words of PSA's set name show up in our set name.
+  const brandWords = String(p.brand || '').toLowerCase().replace(/pokemon|japanese|&/g, ' ').split(/\W+/).filter(w => w.length > 2);
+  const score = c => {
+    const s = (setById.get(setIdOf(c.id))?.name || '').toLowerCase();
+    return brandWords.filter(w => s.includes(w)).length;
+  };
+  hits = [...hits].sort((a, b) => score(b) - score(a));
+  const best = hits[0];
+  if (best && (hits.length === 1 || score(best) > score(hits[1]))) {
+    try { await selectCard(best.id); box.innerHTML = ''; return; } catch {}
+  }
+  const list = (hits.length ? hits : sortCards(cards)).slice(0, 60);
+  box.innerHTML = `<p class="note">Found: ${esc(label)}. ${list.length ? 'Tap the matching card:' : "Couldn't match it automatically. Search for the card above; the grade and cert will still fill in."}</p>` +
+    list.map(c => {
+      const s = setById.get(setIdOf(c.id));
+      return `<button type="button" class="result" data-card="${esc(c.id)}">
+        ${cardImg(c.id, c.image)}
+        <b>${esc(c.name)}</b><span>${esc(s ? s.name : setIdOf(c.id))} · #${esc(c.localId)}</span></button>`;
+    }).join('');
+}
+$('#psaLookup').addEventListener('click', psaLookup);
+$('#psaCert').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); psaLookup(); } });
 
 // Open the Add form with a card already chosen (from the set checklist or a scan).
 async function openFormWithCard(cardId, list) {
@@ -858,7 +944,11 @@ itemForm.addEventListener('submit', e => {
       variant: f.variant.value, condition: f.condition.value,
       variantName: (pickedOpts.find(o => o.key === f.variant.value) || {}).label || variantLabel(f.variant.value),
       grader: f.condition.value === 'Graded' ? f.grader.value : '', grade: f.condition.value === 'Graded' ? f.grade.value.trim() : '',
+      cert: f.condition.value === 'Graded' ? f.cert.value.replace(/\D/g, '') : '',
     };
+    if (psaPending && data.cert === psaPending.cert && data.grader === 'PSA') {
+      data.psaPop = psaPending.population; data.psaPopHigher = psaPending.populationHigher;
+    }
   } else {
     const name = f.sealedName.value.trim();
     if (!name) return err('Give the product a name.');
@@ -929,7 +1019,9 @@ function renderDetail() {
   $('#dName').textContent = it.name;
   $('#dMeta').textContent = [it.setName, it.number && '#' + it.number, it.rarity, versionText(it),
     it.category && `Category: ${it.category}`, s.qty > 1 && `Qty ${s.qty}`,
-    it.acquired && `Acquired ${fmtDate(it.acquired)}`, it.notes].filter(Boolean).join(' · ');
+    it.acquired && `Acquired ${fmtDate(it.acquired)}`, it.cert && `Cert #${it.cert}`,
+    it.psaPop != null && `PSA pop: ${it.psaPop} at this grade` + (it.psaPopHigher != null ? `, ${it.psaPopHigher} higher` : ''),
+    it.notes].filter(Boolean).join(' · ');
 
   const wish = it.list === 'wishlist';
   $('#dStats').innerHTML =
