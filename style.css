@@ -507,3 +507,23 @@ body { padding-bottom: calc(84px + max(env(safe-area-inset-bottom), 12px)); }
 .bottom-nav svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .toast { bottom: calc(96px + max(env(safe-area-inset-bottom), 12px)); }
 @media (min-width: 900px) { .bottom-nav button { flex-direction: row; } }
+
+/* ---------- Skylanders ---------- */
+.sky-stats { margin: 4px 0 14px; }
+.sky-logo { font-weight: 700; font-size: 13px !important; color: var(--accent) !important; }
+.sky-list { display: grid; gap: 4px; }
+.sky-type { margin: 14px 0 4px; font-size: 15px; display: flex; gap: 8px; align-items: baseline; }
+.sky-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 10px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text); font: inherit; }
+.sky-row:hover { background: var(--row-hover); }
+.sky-row .grow { min-width: 0; }
+.sky-row b { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.sky-row small { color: var(--muted); font-size: 12px; }
+.sky-row .mark { flex: none; width: 24px; height: 24px; border-radius: 6px; border: 2px solid var(--border);
+  display: grid; place-items: center; font-weight: 700; font-size: 14px; }
+.sky-row.owned .mark { background: var(--up); border-color: var(--up); color: #fff; }
+.sky-row.wish .mark { border-color: #e0559a; color: #e0559a; }
+.sky-row .price { flex: none; font-weight: 600; font-size: 14px; }
+#skyDialog .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#skyDialog input, #skyDialog select { font-size: 16px; }
+.bottom-nav button span { white-space: nowrap; }

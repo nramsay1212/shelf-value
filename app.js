@@ -636,6 +636,7 @@ function renderHero() {
 }
 
 function render() {
+  if (page === 'sky' && typeof renderSky === 'function') renderSky();
   const coll = items.filter(i => i.list === 'collection').map(it => ({ it, s: itemStats(it) }));
   const wish = items.filter(i => i.list === 'wishlist').map(it => ({ it, s: itemStats(it) }));
   const total = coll.reduce((a, r) => a + r.s.value, 0);
@@ -665,9 +666,10 @@ function render() {
   });
 
   // filter dropdowns
-  fillSelect($('#categoryFilter'), 'All categories', items.map(i => i.category));
-  fillSelect($('#setFilter'), 'All sets', items.map(i => i.setName));
-  $('#categoryList').innerHTML = [...new Set(items.map(i => i.category).filter(Boolean))].sort()
+  const pokeItems = items.filter(i => i.kind !== 'sky');
+  fillSelect($('#categoryFilter'), 'All categories', pokeItems.map(i => i.category));
+  fillSelect($('#setFilter'), 'All sets', pokeItems.map(i => i.setName));
+  $('#categoryList').innerHTML = [...new Set(pokeItems.map(i => i.category).filter(Boolean))].sort()
     .map(c => `<option value="${esc(c)}">`).join('');
 
   $('#typeFilter').hidden = view === 'grading';
@@ -1525,7 +1527,7 @@ async function refreshEbay(it) {
 }
 
 const needsEbay = it => !!workerUrl() && (!it.ebay || Date.now() - it.ebay.fetched > EBAY_MAX_AGE);
-const ebayTargets = () => items.filter(it => it.list !== 'sold' && (
+const ebayTargets = () => items.filter(it => it.list !== 'sold' && it.kind !== 'sky' && (
   it.kind !== 'card' || isGraded(it) ||
   (it.list === 'collection' && it.condition === 'Near Mint' && itemStats(it).unit >= (settings.gMin || 0))));
 
@@ -3081,13 +3083,202 @@ function renderSaleBox(it) {
 // =====================================================================
 // Bottom bar: Collection / Sets / Settings
 // =====================================================================
+// =====================================================================
+// Skylanders: its own checklist and totals, kept apart from the Pokémon collection.
+// Items are stored with kind 'sky' and list 'sky' (owned) or 'skywish' (wishlist),
+// so they sync with everything else but never count toward Pokémon totals.
+// =====================================================================
+const SKYD = window.SKY || { games: [], types: [], items: [], byId: new Map() };
+let skyGameId = '', skyMode = 'all';
+const skyOwned = () => items.filter(i => i.kind === 'sky' && i.list === 'sky');
+const skyWished = () => items.filter(i => i.kind === 'sky' && i.list === 'skywish');
+const skyGameName = id => (SKYD.games.find(g => g.id === id) || {}).name || '';
+
+function skyHoldings() {
+  const m = new Map();
+  items.forEach(it => {
+    if (it.kind !== 'sky') return;
+    const h = m.get(it.skyId) || { qty: 0, wish: null, own: null };
+    if (it.list === 'sky') { h.qty += it.qty || 1; h.own = it; } else if (it.list === 'skywish') h.wish = it;
+    m.set(it.skyId, h);
+  });
+  return m;
+}
+
+function renderSky() {
+  const owned = skyOwned();
+  const value = owned.reduce((a, it) => a + itemStats(it).value, 0);
+  const cost = owned.reduce((a, it) => a + itemStats(it).cost, 0);
+  const count = owned.reduce((a, it) => a + (it.qty || 1), 0);
+  $('#skyStats').innerHTML =
+    statTile('Worth', money(value)) + statTile('Paid', money(cost)) +
+    statTile('Gain / loss', signedMoney(value - cost), cls(value - cost)) +
+    statTile('Owned', count.toLocaleString()) + statTile('Wishlist', skyWished().length.toLocaleString());
+  $('#skyHome').hidden = !!skyGameId;
+  $('#skyGame').hidden = !skyGameId;
+  if (skyGameId) renderSkyGame(); else renderSkyHome();
+}
+
+function renderSkyHome() {
+  const have = skyHoldings();
+  $('#skyGames').innerHTML = SKYD.games.map(g => {
+    const list = SKYD.items.filter(i => i.game === g.id);
+    const own = list.filter(i => have.get(i.id)?.qty).length;
+    return `<button class="set-card" data-sky-game="${esc(g.id)}">
+      <span class="nologo sky-logo">${esc(g.year || '★')}</span>
+      <span><b>${esc(g.name)}</b><small>${list.length} items${own ? ` · ${own} owned` : ''}</small>
+      ${own ? `<div class="mini"><span style="width:${Math.min(100, own / list.length * 100)}%"></span></div>` : ''}</span>
+    </button>`;
+  }).join('');
+  const q = $('#skySearchAll').value.trim().toLowerCase();
+  const box = $('#skySearchResults');
+  box.hidden = !q;
+  $('#skyGames').hidden = !!q;
+  if (q) {
+    const words = q.split(/\s+/);
+    const hits = SKYD.items.filter(i => words.every(w => `${i.name} ${i.type} ${skyGameName(i.game)}`.toLowerCase().includes(w)));
+    box.innerHTML = hits.length ? hits.slice(0, 200).map(i => skyRow(i, have, true)).join('')
+      : '<p class="note">Nothing matches that. Try just the name, like "Spyro".</p>';
+  }
+}
+
+function skyRow(i, have, showGame = false) {
+  const h = have.get(i.id);
+  const state = h?.qty ? 'owned' : h?.wish ? 'wish' : 'missing';
+  const mark = state === 'owned' ? '✓' : state === 'wish' ? '♥' : '';
+  const v = h?.own ? itemStats(h.own) : null;
+  return `<button class="sky-row ${state}" data-sky="${esc(i.id)}">
+    <span class="mark">${mark}</span>
+    <span class="grow"><b>${esc(i.name)}</b><small>${esc([showGame && skyGameName(i.game), i.type, h?.own?.condition, h?.qty > 1 && `×${h.qty}`].filter(Boolean).join(' · '))}</small></span>
+    <span class="price">${v?.priced ? money(v.unit) : ''}</span></button>`;
+}
+
+function renderSkyGame() {
+  const g = SKYD.games.find(x => x.id === skyGameId) || {};
+  const list = SKYD.items.filter(i => i.game === skyGameId);
+  const have = skyHoldings();
+  $('#skyTitle').textContent = g.name ? (g.id === 'other' ? g.name : `Skylanders ${g.name}`) : '';
+  $('#skySub').textContent = [g.year, `${list.length} items`, g.note].filter(Boolean).join(' · ');
+  const ownedN = list.filter(i => have.get(i.id)?.qty).length;
+  const wishN = list.filter(i => have.get(i.id)?.wish).length;
+  const worth = list.reduce((a, i) => a + (have.get(i.id)?.own ? itemStats(have.get(i.id).own).value : 0), 0);
+  const pctOwned = list.length ? ownedN / list.length * 100 : 0;
+  $('#skyProgress').innerHTML = `<b>${ownedN} / ${list.length}</b> owned (${pctOwned.toFixed(0)}%)
+    <div class="meter"><span style="width:${pctOwned}%"></span></div>
+    <span class="muted">${wishN} on wishlist · yours worth ${money(worth)}</span>`;
+  $$('#skyChips button').forEach(b => b.classList.toggle('on', b.dataset.f === skyMode));
+
+  const types = SKYD.types.filter(t => list.some(i => i.type === t));
+  const sel = $('#skyType'), cur = sel.value;
+  sel.innerHTML = '<option value="">All types</option>' + types.map(t => `<option${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('');
+  const q = $('#skySearch').value.trim().toLowerCase();
+  const shown = list.filter(i => {
+    const h = have.get(i.id);
+    return (skyMode === 'all' || (skyMode === 'owned' && h?.qty) || (skyMode === 'missing' && !h?.qty) || (skyMode === 'wish' && h?.wish)) &&
+      (!sel.value || i.type === sel.value) && (!q || i.name.toLowerCase().includes(q));
+  });
+  $('#skyList').innerHTML = shown.length ? types.map(t => {
+    const rows = shown.filter(i => i.type === t).sort((a, b) => a.name.localeCompare(b.name));
+    return rows.length ? `<h3 class="sky-type">${esc(t)} <span class="muted small">${rows.length}</span></h3>` + rows.map(i => skyRow(i, have)).join('') : '';
+  }).join('') : `<p class="note">${{ owned: 'You don\'t own anything from this game yet.', missing: 'You have everything here! 🎉', wish: 'Nothing from this game on your wishlist.' }[skyMode] || 'Nothing matches that search.'}</p>`;
+}
+
+function openSkyGame(id) {
+  skyGameId = id; skyMode = 'all';
+  $('#skySearch').value = ''; $('#skyType').value = '';
+  renderSky();
+  window.scrollTo({ top: 0 });
+}
+$('#skyGames').addEventListener('click', e => { const b = e.target.closest('[data-sky-game]'); if (b) openSkyGame(b.dataset.skyGame); });
+$('#skyBack').addEventListener('click', () => { skyGameId = ''; renderSky(); window.scrollTo({ top: 0 }); });
+$('#skyChips').addEventListener('click', e => { const b = e.target.closest('[data-f]'); if (b) { skyMode = b.dataset.f; renderSkyGame(); } });
+$('#skyType').addEventListener('change', renderSkyGame);
+$('#skySearch').addEventListener('input', renderSkyGame);
+$('#skySearchAll').addEventListener('input', renderSkyHome);
+['#skyList', '#skySearchResults'].forEach(s => $(s).addEventListener('click', e => {
+  const b = e.target.closest('[data-sky]');
+  if (b) openSkyItem(b.dataset.sky);
+}));
+
+// ---- add / edit one item ----
+const skyDialog = $('#skyDialog'), skyForm = $('#skyForm');
+let skyEditId = '';
+function openSkyItem(skyId) {
+  const def = SKYD.byId.get(skyId);
+  if (!def) return;
+  skyEditId = skyId;
+  const h = skyHoldings().get(skyId) || {};
+  const own = h.own, f = skyForm.elements;
+  $('#skyDName').textContent = def.name;
+  $('#skyDMeta').textContent = [`Skylanders ${skyGameName(def.game)}`.replace('Skylanders Other items', 'Skylanders'), def.type].join(' · ');
+  $('#skyDHave').textContent = [own ? `✓ In your collection${own.qty > 1 ? ` (×${own.qty})` : ''}` : '', h.wish ? '♥ On your wishlist' : ''].filter(Boolean).join(' · ');
+  f.condition.value = own?.condition || 'Loose';
+  f.qty.value = own?.qty || 1;
+  f.paid.value = own?.paid ?? '';
+  const last = own ? sortedPrices(own).pop() : null;
+  f.value.value = last ? last.price : '';
+  f.notes.value = own?.notes || '';
+  $('#skyDEbay').href = ebayUrl(`skylanders ${def.name.replace(/[[\]]/g, ' ')}`);
+  $('#skyDSave').innerHTML = own ? '&#10003; Save changes' : '&#10003; Add to collection';
+  $('#skyDWish').innerHTML = h.wish ? '&#9829; Remove from wishlist' : '&#9825; Add to wishlist';
+  $('#skyDWish').hidden = !!own;
+  $('#skyDDelete').hidden = !own;
+  skyDialog.showModal();
+}
+
+skyForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const def = SKYD.byId.get(skyEditId), f = skyForm.elements;
+  const h = skyHoldings().get(skyEditId) || {};
+  let it = h.own;
+  const isNew = !it;
+  if (!it) {
+    it = migrate({ kind: 'sky', list: 'sky', skyId: def.id, name: def.name, setName: `Skylanders ${skyGameName(def.game)}`,
+      productType: def.type, added: today(), prices: [] });
+    items.push(it);
+  }
+  it.condition = f.condition.value;
+  it.qty = Math.max(1, parseInt(f.qty.value) || 1);
+  it.paid = num(f.paid.value);
+  it.notes = f.notes.value.trim();
+  if (num(f.value.value) != null) upsertPrice(it, today(), num(f.value.value), 'Manual');
+  if (isNew && h.wish) items = items.filter(i => i !== h.wish); // got it: off the wishlist
+  save();
+  skyDialog.close();
+  renderSky();
+  toast(isNew ? `✓ Added ${def.name}` : `✓ Saved ${def.name}`);
+});
+
+$('#skyDWish').addEventListener('click', () => {
+  const def = SKYD.byId.get(skyEditId);
+  const h = skyHoldings().get(skyEditId) || {};
+  if (h.wish) { items = items.filter(i => i !== h.wish); toast(`Removed ${def.name} from your wishlist`); }
+  else {
+    items.push(migrate({ kind: 'sky', list: 'skywish', skyId: def.id, name: def.name, setName: `Skylanders ${skyGameName(def.game)}`,
+      productType: def.type, added: today(), prices: [] }));
+    toast(`♥ Added ${def.name} to your wishlist`);
+  }
+  save(); skyDialog.close(); renderSky();
+});
+
+$('#skyDDelete').addEventListener('click', () => {
+  const def = SKYD.byId.get(skyEditId);
+  const h = skyHoldings().get(skyEditId) || {};
+  if (!h.own || !confirm(`Remove ${def.name} from your Skylanders collection?`)) return;
+  items = items.filter(i => i !== h.own);
+  save(); skyDialog.close(); renderSky();
+  toast(`Removed ${def.name}`);
+});
+
 function showPage(p, { scroll = true } = {}) {
   page = p;
   $('#pageCollection').hidden = p !== 'collection';
   $('#pageSets').hidden = p !== 'sets';
+  $('#pageSky').hidden = p !== 'sky';
   $('#pageSettings').hidden = p !== 'settings';
   $$('#bottomNav button').forEach(b => b.classList.toggle('on', b.dataset.page === p));
   if (p === 'sets') renderSetsView();
+  if (p === 'sky') renderSky();
   if (p === 'settings') { renderSyncSettings(); fillWorkerSetting(); renderAlertsSetting(); storeSyncMeta(); }
   if (p === 'collection') render();
   if (scroll) window.scrollTo({ top: 0 });
@@ -3097,6 +3288,7 @@ $('#bottomNav').addEventListener('click', e => {
   if (!b) return;
   // Tapping Sets again while inside a set goes back to the list of sets.
   if (b.dataset.page === 'sets' && page === 'sets' && browseSetId) { browseSetId = ''; renderSetsView(); window.scrollTo({ top: 0 }); return; }
+  if (b.dataset.page === 'sky' && page === 'sky' && skyGameId) { skyGameId = ''; renderSky(); window.scrollTo({ top: 0 }); return; }
   showPage(b.dataset.page);
 });
 

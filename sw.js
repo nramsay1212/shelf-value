@@ -1,8 +1,8 @@
 // Shelf Value service worker: lets the app open offline and caches card images.
-const VERSION = 'v16';
+const VERSION = 'v17';
 const SHELL = `shelf-shell-${VERSION}`;
 const IMAGES = 'shelf-images';
-const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
+const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'skylanders.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'];
 
 self.addEventListener('install', e => {
