@@ -3136,7 +3136,7 @@ function renderSkyHome() {
   $('#skyGames').hidden = !!q;
   if (q) {
     const words = q.split(/\s+/);
-    const hits = SKYD.items.filter(i => words.every(w => `${i.name} ${i.type} ${skyGameName(i.game)}`.toLowerCase().includes(w)));
+    const hits = SKYD.items.filter(i => words.every(w => `${i.name} ${i.note || ""} ${i.type} ${skyGameName(i.game)}`.toLowerCase().includes(w)));
     box.innerHTML = hits.length ? hits.slice(0, 200).map(i => skyRow(i, have, true)).join('')
       : '<p class="note">Nothing matches that. Try just the name, like "Spyro".</p>';
   }
@@ -3149,7 +3149,7 @@ function skyRow(i, have, showGame = false) {
   const v = h?.own ? itemStats(h.own) : null;
   return `<button class="sky-row ${state}" data-sky="${esc(i.id)}">
     <span class="mark">${mark}</span>
-    <span class="grow"><b>${esc(i.name)}</b><small>${esc([showGame && skyGameName(i.game), i.type, h?.own?.condition, h?.qty > 1 && `×${h.qty}`].filter(Boolean).join(' · '))}</small></span>
+    <span class="grow"><b>${esc(i.name)}</b><small>${esc([i.note, showGame && skyGameName(i.game), i.type, h?.own?.condition, h?.qty > 1 && `×${h.qty}`].filter(Boolean).join(' · '))}</small></span>
     <span class="price">${v?.priced ? money(v.unit) : ''}</span></button>`;
 }
 
@@ -3175,7 +3175,7 @@ function renderSkyGame() {
   const shown = list.filter(i => {
     const h = have.get(i.id);
     return (skyMode === 'all' || (skyMode === 'owned' && h?.qty) || (skyMode === 'missing' && !h?.qty) || (skyMode === 'wish' && h?.wish)) &&
-      (!sel.value || i.type === sel.value) && (!q || i.name.toLowerCase().includes(q));
+      (!sel.value || i.type === sel.value) && (!q || `${i.name} ${i.note || ''}`.toLowerCase().includes(q));
   });
   $('#skyList').innerHTML = shown.length ? types.map(t => {
     const rows = shown.filter(i => i.type === t).sort((a, b) => a.name.localeCompare(b.name));
@@ -3210,7 +3210,7 @@ function openSkyItem(skyId) {
   const h = skyHoldings().get(skyId) || {};
   const own = h.own, f = skyForm.elements;
   $('#skyDName').textContent = def.name;
-  $('#skyDMeta').textContent = [`Skylanders ${skyGameName(def.game)}`.replace('Skylanders Other items', 'Skylanders'), def.type].join(' · ');
+  $('#skyDMeta').textContent = [def.note, `Skylanders ${skyGameName(def.game)}`.replace('Skylanders Other items', 'Skylanders'), def.type].filter(Boolean).join(' · ');
   $('#skyDHave').textContent = [own ? `✓ In your collection${own.qty > 1 ? ` (×${own.qty})` : ''}` : '', h.wish ? '♥ On your wishlist' : ''].filter(Boolean).join(' · ');
   f.condition.value = own?.condition || 'Loose';
   f.qty.value = own?.qty || 1;

@@ -719,6 +719,38 @@ Zook - Eon's Elite
 Zook - Giants, Series 2
 Zook - Giants, Stone, Series 2`.split('\n').map(s => s.trim()).filter(Boolean);
 
+// Found on the Skylanders wiki but missing from the list above.
+NAMES.push('Bouncer - Giants', 'Snap Shot - Trap Team, Instant', 'Food Fight - Trap Team, Instant',
+  'Dive Clops - SuperChargers, Instant', 'Spitfire - SuperChargers, Instant', 'Stealth Elf - SuperChargers, Super Shot, Instant',
+  'Dive Bomber - SuperChargers, Instant', 'Stealth Stinger - SuperChargers, Instant');
+
+// What each trap is called in the game (from the wiki), plus a few fuller names.
+const NOTES = {
+  'Air Toucan': 'Breezy Bird', 'Air Snake': 'Cloudy Cobra', 'Air Sword': 'Cyclone Sabre', 'Air Jughead': 'Drafty Decanter',
+  'Air Screamer': 'Storm Warning', 'Air Hourglass': 'Tempest Timer',
+  'Dark Sword': 'Dark Dagger', 'Dark Handstand': 'Ghastly Grimace', 'Dark Spider': 'Shadow Spider',
+  'Earth Orb': 'Banded Boulder', 'Earth Hourglass': 'Dust of Time', 'Earth Toucan': 'Rock Hawk', 'Earth Handstand': 'Rubble Trouble',
+  'Earth Hammer': 'Slag Hammer', 'Earth Totem': 'Spinning Sandstorm',
+  'Fire Yawn': 'Blazing Belch', 'Fire Torch': 'Eternal Flame', 'Fire Torch Trap': 'Eternal Flame', 'Fire Scepter': 'Fire Flower',
+  'Fire Screamer': 'Scorching Stopper', 'Fire Totem': 'Searing Spinner', "Fire Captain's Hat": 'Spark Spear',
+  'Life Torch': 'Emerald Energy', 'Life Sword': 'Jade Blade', 'Life Toucan': 'Oak Eagle', 'Life Snake': 'Seed Serpent',
+  'Life Yawn': 'Shrub Shrieker', 'Life Hammer': 'Weed Whacker',
+  'Light Yawn': 'Beam Scream', 'Light Owl': 'Heavenly Hawk', 'Light Rocket': 'Shining Ship',
+  'Magic Hourglass': 'Arcane Hourglass', 'Magic Axe': 'Axe of Illusion', 'Magic Log Holder': "Biter's Bane", 'Magic Rocket': 'Rune Rocket',
+  'Magic Skull': 'Sorcerous Skull', 'Magic Totem': 'Spell Slapper',
+  'Tech Angel': 'Automatic Angel', 'Tech Scepter': 'Factory Flower', 'Tech Hand': 'Grabbing Gadget', 'Tech Flying Helmet': 'Makers Mana',
+  'Tech Tiki': 'Tech Totem', 'Tech Handstand': 'Topsy Techy',
+  "Undead Captain's Hat": 'Dream Piercer', 'Undead Hand': 'Grim Gripper', 'Undead Axe': 'Haunted Hatchet', 'Undead Skull': 'Spectral Skull',
+  'Undead Orb': 'Spirit Sphere', 'Undead Snake': 'Spooky Snake',
+  'Water Axe': 'Aqua Axe', 'Water Jughead': 'Flood Flask', 'Water Flying Helmet': 'Frost Helm', 'Water Angel': 'Soaking Staff',
+  'Water Tiki': 'Tidal Tiki', 'Water Log Holder': 'Wet Walter',
+  'Water Trap - Legendary Water Jughead': 'Legendary Flood Flask', 'Undead Trap - Legendary Undead Orb': 'Legendary Spirit Sphere',
+  'Undead Trap - Legendary Undead Skull': 'Legendary Spectral Skull',
+  'Ghost Swords': 'Ghost Pirate Swords', 'Time Twister': 'Time Twister Hourglass', 'Sparx Dragonfly': 'Sparx the Dragonfly',
+  'Volcanic Vault': 'Battle arena (special offer)', 'Sir Hoodington': 'Promotional Imaginator',
+  'Hot Streak - SuperChargers, Mobile': 'Instant Hot Streak',
+};
+
 // The games themselves (not in the figure list above).
 const GAME_DISCS = [
   ['ssa', "Skylanders: Spyro's Adventure (game)"], ['giants', 'Skylanders Giants (game)'],
@@ -761,7 +793,7 @@ const NEW_VERSION = ['twin blade', 'lava barf', 'mega ram', 'knockout', 'horn bl
 const GAME_WORDS = [[/imaginators/i, 'imag'], [/superchargers|supercharged/i, 'super'], [/trap team|eon's elite/i, 'trap'],
   [/swap force/i, 'swap'], [/\bgiants\b|sidekicks/i, 'giants'], [/spyro's adventure|^adventure$/i, 'ssa']];
 const ELEMENT = /^(air|earth|fire|water|life|undead|magic|tech|light|dark|kaos|ultimate kaos)\b/i;
-const CRYSTAL_SHAPE = /acorn|angel creation|armor|claw creation|fanged|lantern creation|pyramid creation|reactor|rocket creation|rune|creation crystal|crystal -|^(light|dark|legendary) (creation )?crystal$|^light crystal/i;
+const CRYSTAL_SHAPE = /acorn|angel creation|armor|claw creation|fanged|lantern creation|pyramid creation|reactor|rocket creation|rune|creation crystal|crystal -|^(light|dark|legendary) (creation )?crystal$|^light crystal|^(dark pyramid|undead claw|magic lantern)$/i;
 
 const slug = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const gameIn = s => (GAME_WORDS.find(([re]) => re.test(s)) || [])[1] || '';
@@ -781,12 +813,25 @@ const OVERRIDE = {
   'Lost Imaginite Mines Level Pack [Master Ro-Bow]': ['imag', 'Adventure Packs'],
   'Gryphon Park Observatory [Adventure Pack]': ['imag', 'Adventure Packs'],
   'Portal Of Power [Glow In The Dark]': ['other', 'Portals'],
+  // From the Skylanders wiki's Magic Item list
+  'Anvil Rain': ['ssa', 'Magic Items'], 'Ghost Swords': ['ssa', 'Magic Items'], 'Healing Elixir': ['ssa', 'Magic Items'],
+  'Hidden Treasure': ['ssa', 'Magic Items'], 'Sky-Iron Shield': ['ssa', 'Magic Items'], 'Sparx Dragonfly': ['ssa', 'Magic Items'],
+  'Time Twister': ['ssa', 'Magic Items'], 'Volcanic Vault': ['ssa', 'Magic Items'], 'Winged Boots': ['ssa', 'Magic Items'],
+  'Dragonfire Cannon': ['giants', 'Magic Items'], 'Golden Dragonfire Cannon': ['giants', 'Magic Items'],
+  'Scorpion Striker Catapult': ['giants', 'Magic Items'], 'Platinum Treasure Chest': ['giants', 'Magic Items'],
+  'Arkeyan Crossbow': ['swap', 'Magic Items'], 'Battle Hammer': ['swap', 'Magic Items'], 'Fiery Forge': ['swap', 'Magic Items'],
+  'Groove Machine': ['swap', 'Magic Items'], 'Platinum Sheep': ['swap', 'Magic Items'], 'Sky Diamond': ['swap', 'Magic Items'],
+  'Rocket Ram': ['trap', 'Magic Items'], 'Tiki Speaky': ['trap', 'Magic Items'], 'Piggy Bank - Trap Team, Legendary': ['trap', 'Magic Items'],
+  'Sir Hoodington': ['imag', 'Figures'], 'Double Trouble - Royal': ['giants', 'Variants'],
+  // Eon's Elite figures released with SuperChargers
+  "Boomer - Eon's Elite": ['super', 'Variants'], "Dino-Rang - Eon's Elite": ['super', 'Variants'], "Ghost Roaster - Eon's Elite": ['super', 'Variants'],
+  "Slam Bam - Eon's Elite": ['super', 'Variants'], "Voodood - Eon's Elite": ['super', 'Variants'], "Zook - Eon's Elite": ['super', 'Variants'],
 };
 
 function classify(name) {
   if (OVERRIDE[name]) {
     const [game, type] = OVERRIDE[name];
-    return { id: 'sky-' + slug(name), name, game, type };
+    return { id: 'sky-' + slug(name), name, game, type, note: NOTES[name] || '' };
   }
   const base = name.split(/ - |\s*\[/)[0].trim();
   const tags = [...name.slice(base.length).matchAll(/[^,\-\[\]]+/g)].map(m => m[0].trim()).filter(Boolean);
@@ -807,7 +852,7 @@ function classify(name) {
   else if (/trophy/i.test(name)) { type = 'Trophies'; game = 'super'; }
   else if (/mystery chest|chest \[/i.test(name)) { type = 'Magic Items'; game = 'imag'; }
   else if (ELEMENT.test(name) && CRYSTAL_SHAPE.test(name)) { type = 'Creation Crystals'; game = 'imag'; }
-  else if (ELEMENT.test(name) && (!game || game === 'trap') && !/bowser|donkey kong|barrel blaster|clown cruiser|spyro|^tech angel$/i.test(name) && !VEHICLES.some(v => name.includes(v))) {
+  else if (ELEMENT.test(name) && (!game || game === 'trap') && !/bowser|donkey kong|barrel blaster|clown cruiser|spyro/i.test(name) && !VEHICLES.some(v => name.includes(v))) {
     type = 'Traps'; game = 'trap';
   }
   else if (VEHICLES.some(v => base.endsWith(v))) { type = 'Vehicles'; game = 'super'; }
@@ -832,7 +877,7 @@ function classify(name) {
     else if (rest.length && rest.every(t => NEW_VERSION.includes(t.toLowerCase()))) type = 'Figures';
     else type = 'Variants';
   }
-  return { id: 'sky-' + slug(name), name, game: game || 'other', type };
+  return { id: 'sky-' + slug(name), name, game: game || 'other', type, note: NOTES[name] || '' };
 }
 
 const ITEMS = NAMES.map(classify);
