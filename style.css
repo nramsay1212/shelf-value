@@ -527,3 +527,9 @@ body { padding-bottom: calc(84px + max(env(safe-area-inset-bottom), 12px)); }
 #skyDialog .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 #skyDialog input, #skyDialog select { font-size: 16px; }
 .bottom-nav button span { white-space: nowrap; }
+.sky-thumb { flex: none; width: 44px; height: 44px; border-radius: 8px; background: var(--row-hover); display: grid; place-items: center; overflow: hidden; }
+.sky-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.sky-dimg { width: 96px; height: 96px; object-fit: contain; border-radius: 10px; background: var(--row-hover); flex: none; cursor: zoom-in; }
+#skyDialog .detail-head { gap: 12px; align-items: flex-start; }
+.sky-credit { margin-top: 16px; }
+.sky-links { display: flex; flex-wrap: wrap; gap: 6px 16px; }

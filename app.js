@@ -3105,6 +3105,87 @@ function skyHoldings() {
   return m;
 }
 
+// ---- pictures, loaded from the Skylanders wiki's image server (nothing is copied into the app) ----
+const SKY_WIKI = 'https://skylanders.fandom.com/api.php?format=json&formatversion=2&origin=*&redirects=1';
+const SKY_IMG_KEY = 'shelf-value-sky-wiki-v1';
+const skyImgs = readJSON(SKY_IMG_KEY, {});      // item id -> wiki page with its picture ('' = none found)
+const SKY_GAME_PAGES = { ssa: "Skylanders: Spyro's Adventure", giants: 'Skylanders: Giants', swap: 'Skylanders: Swap Force',
+  trap: 'Skylanders: Trap Team', super: 'Skylanders: SuperChargers', imag: 'Skylanders: Imaginators' };
+const SKY_SKIP_TAGS = /^(giants|swap force|trap team|superchargers|imaginators|spyro's adventure|adventure|series [23]|e3|toy fair|employee|holiday|mobile|\d{4}|walmart|target pre-order card|employee edition|happy birthday ben|macy's thanksgiving day parade|sidekicks|minis?|buddy pack)$/i;
+const cap = s => s.replace(/\b\w/g, c => c.toUpperCase()).replace(/\bOf\b/g, 'of');
+
+function skyImgCandidates(def) {
+  const n = def.name, out = [];
+  const elem = (n.match(/^(air|earth|fire|water|life|undead|magic|tech|light|dark|kaos|ultimate kaos)\b/i) || [])[1];
+  const E = elem ? cap(elem.replace(/^ultimate /i, '')) : '';
+  if (def.type === 'Traps') {
+    if (/legendary/i.test(n)) out.push('File:Legendary Traps.png');
+    if (/ultimate kaos/i.test(n)) out.push('File:Ultimate Kaos Trap.png');
+    if (E) out.push(`File:${E} Traps.png`);
+    out.push('Trap');
+    return out;
+  }
+  if (def.type === 'Creation Crystals') {
+    if (/legendary/i.test(n)) out.push('File:Legendary Crystals.png');
+    if (E) out.push(`File:${E} Crystals.png`);
+    out.push('Creation Crystal');
+    return out;
+  }
+  if (def.type === 'Portals') return [def.game === 'trap' ? 'Traptanium Portal' : 'Portal of Power', 'Portal of Power'];
+  if (def.type === 'Games') return [/racing/i.test(n) ? 'Skylanders: SuperChargers Racing' : SKY_GAME_PAGES[def.game]].filter(Boolean);
+  if (def.note && !/promotional|battle arena|instant/i.test(def.note)) out.push(def.note);
+  if (def.type === 'Adventure Packs') {
+    const place = n.replace(/^Skylanders[^:]*:\s*/i, '').replace(/^Skylanders .*?(Adventure Pack: )/i, '').replace(/\s*(Adventure Pack|Level Pack|Dark Element Expansion Pack).*$/i, '')
+      .replace(/\s*[-[].*$/, '').replace(/^Skylanders\s+/i, '').trim();
+    out.push(place, cap(place.toLowerCase()), SKY_GAME_PAGES[def.game]);
+    return out.filter(Boolean);
+  }
+  if (def.type === 'Packs & Bundles' || def.type === 'Accessories') {
+    const first = (n.match(/\[([^,\]]+)/) || [])[1] || (n.match(/^([^&-]+?) & /) || [])[1];
+    if (first && !/^(magic|mobile|two ways|combo)/i.test(first.trim())) out.push(first.trim());
+    out.push(SKY_GAME_PAGES[def.game]);
+    return out.filter(Boolean);
+  }
+  // Figures, variants, vehicles, minis, magic items, trophies
+  const base = n.split(/ - |\s*\[/)[0].trim();
+  const tags = [...n.slice(base.length).matchAll(/[^,\-\[\]]+/g)].map(m => m[0].trim()).filter(t => t && !SKY_SKIP_TAGS.test(t));
+  const plain = base.replace(/^(Master|Sensei)\s+/i, '');
+  const tagWord = t => (/^eon's elite$/i.test(t) ? 'Elite' : /^lightcore$/i.test(t) ? 'LightCore' : t);
+  if (tags.length) {
+    out.push(`${tags.map(tagWord).reverse().join(' ')} ${plain}`, `${tagWord(tags[tags.length - 1])} ${plain}`, `${tagWord(tags[0])} ${plain}`);
+  }
+  out.push(base, plain);
+  return [...new Set(out)];
+}
+
+let skyImgBusy = Promise.resolve();
+function loadSkyImages(defs) {
+  const todo = defs.filter(d => !(d.id in skyImgs)).slice(0, 300);
+  if (!todo.length) return;
+  skyImgBusy = skyImgBusy.then(async () => {
+    const want = new Map(todo.map(d => [d.id, skyImgCandidates(d)]));
+    const titles = [...new Set([...want.values()].flat())];
+    const found = new Map();  // asked-for title -> picture
+    for (let i = 0; i < titles.length; i += 50) {
+      const chunk = titles.slice(i, i + 50);
+      try {
+        const j = await (await fetch(`${SKY_WIKI}&action=query&prop=pageimages|imageinfo&piprop=thumbnail&pithumbsize=300&iiprop=url&iiurlwidth=300&titles=${encodeURIComponent(chunk.join('|'))}`)).json();
+        const alias = new Map();
+        [...(j.query?.normalized || []), ...(j.query?.redirects || [])].forEach(r => alias.set(r.to, [...(alias.get(r.to) || []), r.from]));
+        (j.query?.pages || []).forEach(p => {
+          const src = p.thumbnail?.source || p.imageinfo?.[0]?.thumburl || '';
+          if (!src) return;
+          const names = [p.title, ...(alias.get(p.title) || [])];
+          names.forEach(t => { found.set(t, p.title); (alias.get(t) || []).forEach(a => found.set(a, p.title)); });
+        });
+      } catch { return; } // offline: try again next time
+    }
+    want.forEach((cands, id) => { skyImgs[id] = cands.map(c => found.get(c)).find(Boolean) || ''; });
+    try { localStorage.setItem(SKY_IMG_KEY, JSON.stringify(skyImgs)); } catch { /* storage full */ }
+    if (skyDialog.open && skyEditId) showSkyWikiLink();
+  });
+}
+
 function renderSky() {
   const owned = skyOwned();
   const value = owned.reduce((a, it) => a + itemStats(it).value, 0);
@@ -3203,6 +3284,15 @@ $('#skySearchAll').addEventListener('input', renderSkyHome);
 // ---- add / edit one item ----
 const skyDialog = $('#skyDialog'), skyForm = $('#skyForm');
 let skyEditId = '';
+// The wiki doesn't allow its pictures to be shown inside other sites, so link to the page that has it.
+function showSkyWikiLink() {
+  const def = SKYD.byId.get(skyEditId);
+  if (!def) return;
+  const page = skyImgs[skyEditId];
+  $('#skyDWiki').href = page
+    ? `https://skylanders.fandom.com/wiki/${encodeURIComponent(page.replace(/ /g, '_')).replace(/%3A/g, ':')}`
+    : `https://skylanders.fandom.com/wiki/Special:Search?query=${encodeURIComponent(def.name.split(/ - |\s*\[/)[0])}`;
+}
 function openSkyItem(skyId) {
   const def = SKYD.byId.get(skyId);
   if (!def) return;
@@ -3223,7 +3313,9 @@ function openSkyItem(skyId) {
   $('#skyDWish').innerHTML = h.wish ? '&#9829; Remove from wishlist' : '&#9825; Add to wishlist';
   $('#skyDWish').hidden = !!own;
   $('#skyDDelete').hidden = !own;
+  showSkyWikiLink();
   skyDialog.showModal();
+  loadSkyImages([def]);
 }
 
 skyForm.addEventListener('submit', e => {
