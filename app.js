@@ -467,8 +467,8 @@ function valueAt(date, list) {
   return { date, value, paid };
 }
 
-function collectionSeries(rangeDays) {
-  const list = items.filter(i => i.list === 'collection');
+function collectionSeries(rangeDays, listName = 'collection') {
+  const list = items.filter(i => i.list === listName);
   const dates = new Set([today()]);
   list.forEach(it => {
     it.prices.forEach(p => dates.add(p.date));
@@ -3186,19 +3186,128 @@ function loadSkyImages(defs) {
   });
 }
 
+// Same layout as the Pokémon collection: value chart, stats, then Collection / Wishlist / checklist tabs.
+let skyView = 'collection', skyRange = 0;
 function renderSky() {
-  const owned = skyOwned();
+  const owned = skyOwned(), wished = skyWished();
   const value = owned.reduce((a, it) => a + itemStats(it).value, 0);
   const cost = owned.reduce((a, it) => a + itemStats(it).cost, 0);
   const count = owned.reduce((a, it) => a + (it.qty || 1), 0);
+  const wishCost = wished.reduce((a, it) => a + itemStats(it).value, 0);
+  const gain = value - cost;
+  renderSkyHero();
   $('#skyStats').innerHTML =
-    statTile('Worth', money(value)) + statTile('Paid', money(cost)) +
-    statTile('Gain / loss', signedMoney(value - cost), cls(value - cost)) +
-    statTile('Owned', count.toLocaleString()) + statTile('Wishlist', skyWished().length.toLocaleString());
-  $('#skyHome').hidden = !!skyGameId;
-  $('#skyGame').hidden = !skyGameId;
-  if (skyGameId) renderSkyGame(); else renderSkyHome();
+    statTile('Total paid', money(cost)) +
+    statTile('Gain / loss', signedMoney(gain) + `<small>${pct(cost ? gain / cost * 100 : null)}</small>`, cls(gain)) +
+    statTile('Items owned', count.toLocaleString()) +
+    statTile('Wishlist cost', money(wishCost));
+  const counts = { collection: owned.length, wishlist: wished.length, checklist: SKYD.items.length };
+  $$('#skyTabs button').forEach(b => {
+    b.classList.toggle('on', b.dataset.skyView === skyView);
+    b.innerHTML = b.textContent.replace(/\s*\d+$/, '') + `<span class="count">${counts[b.dataset.skyView]}</span>`;
+  });
+  const mine = skyView !== 'checklist';
+  $('#skyMine').hidden = !mine;
+  $('#skyHome').hidden = mine || !!skyGameId;
+  $('#skyGame').hidden = mine || !skyGameId;
+  if (mine) renderSkyMine();
+  else if (skyGameId) renderSkyGame(); else renderSkyHome();
 }
+
+function renderSkyHero() {
+  const series = collectionSeries(skyRange, 'sky');
+  const last = series[series.length - 1] || { value: 0, paid: 0 };
+  $('#skyHeroValue').textContent = money(last.value);
+  const first = series[0];
+  if (series.length >= 2 && first) {
+    const diff = last.value - first.value;
+    const label = skyRange ? { 30: 'past month', 90: 'past 3 months', 180: 'past 6 months', 365: 'past year' }[skyRange] : `since ${fmtDate(first.date)}`;
+    $('#skyHeroChange').innerHTML = `<span class="${cls(diff)}">${signedMoney(diff)}${pct(first.value ? diff / first.value * 100 : null)}</span> ${label}`;
+  } else $('#skyHeroChange').textContent = '';
+  renderChart($('#skyChart'), series.map(p => p.date), [
+    { values: series.map(p => p.value), cls: 'line', label: 'Value' },
+    { values: series.map(p => p.paid), cls: 'line paid', label: 'Paid' },
+  ], skyOwned().length
+    ? 'Your chart fills in as you update what your Skylanders are worth.'
+    : 'Add Skylanders to your collection to start tracking their value.');
+}
+$('#skyRanges').addEventListener('click', e => {
+  const b = e.target.closest('[data-range]');
+  if (!b) return;
+  skyRange = +b.dataset.range;
+  $$('#skyRanges button').forEach(x => x.classList.toggle('on', x === b));
+  renderSkyHero();
+});
+$('#skyTabs').addEventListener('click', e => {
+  const b = e.target.closest('[data-sky-view]');
+  if (!b) return;
+  skyView = b.dataset.skyView;
+  renderSky();
+});
+
+// ---- my collection / wishlist table ----
+function renderSkyMine() {
+  const wish = skyView === 'wishlist';
+  const list = wish ? skyWished() : skyOwned();
+  const gameSel = $('#skyMineGame'), typeSel = $('#skyMineType');
+  const fill = (sel, label, vals) => { const cur = sel.value; sel.innerHTML = `<option value="">${label}</option>` + vals.map(v => `<option${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join(''); };
+  const defOf = it => SKYD.byId.get(it.skyId) || {};
+  fill(gameSel, 'All games', SKYD.games.map(g => g.name).filter(n => list.some(it => skyGameName(defOf(it).game) === n)));
+  fill(typeSel, 'All types', SKYD.types.filter(t => list.some(it => defOf(it).type === t)));
+  const q = $('#skyMineSearch').value.trim().toLowerCase();
+  let rows = list.map(it => ({ it, s: itemStats(it), d: defOf(it) })).filter(({ it, d }) =>
+    (!gameSel.value || skyGameName(d.game) === gameSel.value) && (!typeSel.value || d.type === typeSel.value) &&
+    (!q || [it.name, d.note, it.notes, it.condition, skyGameName(d.game), d.type].join(' ').toLowerCase().includes(q)));
+  const sorters = {
+    'value-desc': (a, b) => b.s.value - a.s.value, 'value-asc': (a, b) => a.s.value - b.s.value,
+    'name-asc': (a, b) => a.it.name.localeCompare(b.it.name), 'gain-desc': (a, b) => b.s.gain - a.s.gain,
+    'change-desc': (a, b) => Math.abs(b.s.changePct || 0) - Math.abs(a.s.changePct || 0),
+    'added-desc': (a, b) => (b.it.added || '').localeCompare(a.it.added || ''),
+  };
+  rows.sort(sorters[$('#skyMineSort').value]);
+  const table = $('#skyTable');
+  const pic = d => `<td class="thumb">${skyPhoto(d) ? `<img src="${skyPhoto(d)}" alt="" loading="lazy" class="sky-tthumb">` : '<div class="ph">toy</div>'}</td>`;
+  const name = (it, d) => `<td class="name">${esc(it.name)}<small>${esc([d.note, skyGameName(d.game), d.type].filter(Boolean).join(' · '))}</small></td>`;
+  if (!wish) {
+    $('thead', table).innerHTML = `<tr><th></th><th>Skylander</th><th>Condition</th><th class="num">Qty</th>
+      <th class="num">Paid</th><th class="num">Value</th><th class="num">Last change</th><th class="num">Gain</th><th>Priced</th></tr>`;
+    $('tbody', table).innerHTML = rows.map(({ it, s, d }) => `
+      <tr data-sky="${esc(it.skyId)}">${pic(d)}${name(it, d)}
+        <td>${esc(it.condition || '')}</td>
+        <td class="num">${s.qty}</td>
+        <td class="num">${it.paid != null ? money(s.cost) : dash}</td>
+        <td class="num"><b>${s.priced || it.paid != null ? money(s.value) : dash}</b></td>
+        <td class="num ${cls(s.change)}">${s.change == null ? dash : signedMoney(s.change) + pct(s.changePct)}</td>
+        <td class="num ${cls(s.gain)}">${it.paid != null && s.priced ? signedMoney(s.gain) : dash}</td>
+        <td class="${s.lastDate && s.lastDate < daysAgo(90) ? 'stale' : ''}">${s.lastDate ? fmtDate(s.lastDate) : 'never'}</td>
+      </tr>`).join('');
+  } else {
+    $('thead', table).innerHTML = `<tr><th></th><th>Skylander</th><th class="num">Worth</th><th class="num">Target</th><th class="num">Last change</th><th>Added</th></tr>`;
+    $('tbody', table).innerHTML = rows.map(({ it, s, d }) => {
+      const hit = it.target != null && s.priced && s.unit <= it.target;
+      return `<tr data-sky="${esc(it.skyId)}">${pic(d)}${name(it, d)}
+        <td class="num ${hit ? 'hit' : ''}"><b>${s.priced ? money(s.unit) : dash}</b></td>
+        <td class="num">${it.target != null ? money(it.target) + (hit ? ' <span class="hit">✓ at target</span>' : '') : dash}</td>
+        <td class="num ${cls(s.change)}">${s.change == null ? dash : signedMoney(s.change / s.qty) + pct(s.changePct)}</td>
+        <td>${fmtDate(it.added)}</td></tr>`;
+    }).join('');
+  }
+  $('#skyEmpty').hidden = rows.length > 0;
+  $('#skyEmpty').innerHTML = !list.length
+    ? (wish ? 'Your Skylanders wishlist is empty. Tap <b>+ Add</b> (or <b>All Skylanders</b>), pick one and tap <b>♡ Add to wishlist</b>.'
+      : 'No Skylanders in your collection yet. Tap <b>+ Add</b> (or <b>All Skylanders</b>) to find and add your first one.')
+    : 'Nothing matches your filters.';
+}
+['#skyMineSearch'].forEach(s => $(s).addEventListener('input', renderSkyMine));
+['#skyMineGame', '#skyMineType', '#skyMineSort'].forEach(s => $(s).addEventListener('change', renderSkyMine));
+$('#skyTable').addEventListener('click', e => { const tr = e.target.closest('tr[data-sky]'); if (tr) openSkyItem(tr.dataset.sky); });
+// + Add: go to the full list with the search box ready.
+$('#skyAddBtn').addEventListener('click', () => {
+  skyView = 'checklist'; skyGameId = '';
+  renderSky();
+  $('#skySearchAll').focus();
+  $('#skySearchAll').scrollIntoView({ block: 'center' });
+});
 
 function renderSkyHome() {
   const have = skyHoldings();
@@ -3321,16 +3430,20 @@ function openSkyItem(skyId) {
   $('#skyDName').textContent = def.name;
   $('#skyDMeta').textContent = [def.note, `Skylanders ${skyGameName(def.game)}`.replace('Skylanders Other items', 'Skylanders'), def.type].filter(Boolean).join(' · ');
   $('#skyDHave').textContent = [own ? `✓ In your collection${own.qty > 1 ? ` (×${own.qty})` : ''}` : '', h.wish ? '♥ On your wishlist' : ''].filter(Boolean).join(' · ');
+  const src = own || h.wish;
   f.condition.value = own?.condition || 'Loose';
   f.qty.value = own?.qty || 1;
   f.paid.value = own?.paid ?? '';
-  const last = own ? sortedPrices(own).pop() : null;
+  const last = src ? sortedPrices(src).pop() : null;
   f.value.value = last ? last.price : '';
-  f.notes.value = own?.notes || '';
+  f.notes.value = src?.notes || '';
+  f.target.value = h.wish?.target ?? '';
+  f.target.closest('label').hidden = !!own;
   $('#skyDEbay').href = ebayUrl(`skylanders ${def.name.replace(/[[\]]/g, ' ')}`);
-  $('#skyDSave').innerHTML = own ? '&#10003; Save changes' : '&#10003; Add to collection';
-  $('#skyDWish').innerHTML = h.wish ? '&#9829; Remove from wishlist' : '&#9825; Add to wishlist';
+  $('#skyDSave').innerHTML = own ? '&#10003; Save changes' : h.wish ? '&#10003; Got it! Move to collection' : '&#10003; Add to collection';
+  $('#skyDWish').innerHTML = h.wish ? '&#9829; Save wishlist changes' : '&#9825; Add to wishlist';
   $('#skyDWish').hidden = !!own;
+  $('#skyDUnwish').hidden = !!own || !h.wish;
   $('#skyDDelete').hidden = !own;
   showSkyWikiLink();
   showSkyPhoto(def);
@@ -3361,16 +3474,29 @@ skyForm.addEventListener('submit', e => {
   toast(isNew ? `✓ Added ${def.name}` : `✓ Saved ${def.name}`);
 });
 
+// Add to the wishlist, or save its target / worth / notes.
 $('#skyDWish').addEventListener('click', () => {
+  const def = SKYD.byId.get(skyEditId), f = skyForm.elements;
+  const h = skyHoldings().get(skyEditId) || {};
+  let it = h.wish;
+  if (!it) {
+    it = migrate({ kind: 'sky', list: 'skywish', skyId: def.id, name: def.name, setName: `Skylanders ${skyGameName(def.game)}`,
+      productType: def.type, added: today(), prices: [] });
+    items.push(it);
+  }
+  it.target = num(f.target.value);
+  it.notes = f.notes.value.trim();
+  if (num(f.value.value) != null) upsertPrice(it, today(), num(f.value.value), 'Manual');
+  save(); skyDialog.close(); renderSky();
+  toast(h.wish ? `♥ Saved ${def.name}` : `♥ Added ${def.name} to your wishlist`);
+});
+$('#skyDUnwish').addEventListener('click', () => {
   const def = SKYD.byId.get(skyEditId);
   const h = skyHoldings().get(skyEditId) || {};
-  if (h.wish) { items = items.filter(i => i !== h.wish); toast(`Removed ${def.name} from your wishlist`); }
-  else {
-    items.push(migrate({ kind: 'sky', list: 'skywish', skyId: def.id, name: def.name, setName: `Skylanders ${skyGameName(def.game)}`,
-      productType: def.type, added: today(), prices: [] }));
-    toast(`♥ Added ${def.name} to your wishlist`);
-  }
+  if (!h.wish) return;
+  items = items.filter(i => i !== h.wish);
   save(); skyDialog.close(); renderSky();
+  toast(`Removed ${def.name} from your wishlist`);
 });
 
 $('#skyDDelete').addEventListener('click', () => {

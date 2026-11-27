@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=21">
+  <link rel="stylesheet" href="style.css?v=22">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -174,11 +174,60 @@
 
   <!-- ===== Skylanders page ===== -->
   <div id="pageSky" class="page" hidden>
+    <!-- Skylanders value chart -->
+    <section class="card hero">
+      <div class="hero-head">
+        <div>
+          <div class="muted small-caps">Skylanders collection value</div>
+          <div class="big" id="skyHeroValue">$0.00</div>
+          <div id="skyHeroChange" class="muted"></div>
+        </div>
+        <div class="hero-side">
+          <div class="ranges" id="skyRanges">
+            <button data-range="30">1M</button><button data-range="90">3M</button>
+            <button data-range="180">6M</button><button data-range="365">1Y</button>
+            <button data-range="0" class="on">All</button>
+          </div>
+        </div>
+      </div>
+      <div id="skyChart" class="chart tall"></div>
+      <div class="legend"><span class="key value"></span>Value <span class="key paid"></span>Total paid</div>
+    </section>
+
+    <section class="stats" id="skyStats"></section>
+
     <section class="card">
-      <h2 class="page-title">Skylanders</h2>
-      <div id="skyStats" class="stats small sky-stats"></div>
+      <div class="tabs views" id="skyTabs">
+        <button data-sky-view="collection" class="on">Collection</button>
+        <button data-sky-view="wishlist">Wishlist</button>
+        <button data-sky-view="checklist">All Skylanders</button>
+      </div>
+
+      <!-- my collection / wishlist -->
+      <div id="skyMine">
+        <div class="toolbar">
+          <input id="skyMineSearch" type="search" placeholder="Search…">
+          <select id="skyMineGame"><option value="">All games</option></select>
+          <select id="skyMineType"><option value="">All types</option></select>
+          <select id="skyMineSort">
+            <option value="value-desc">Value: high to low</option>
+            <option value="value-asc">Value: low to high</option>
+            <option value="name-asc">Name A to Z</option>
+            <option value="gain-desc">Gain: high to low</option>
+            <option value="change-desc">Biggest movers</option>
+            <option value="added-desc">Recently added</option>
+          </select>
+          <span class="spacer"></span>
+          <button id="skyAddBtn" class="primary">+ Add</button>
+        </div>
+        <div class="table-wrap">
+          <table id="skyTable"><thead></thead><tbody></tbody></table>
+          <p id="skyEmpty" class="empty" hidden></p>
+        </div>
+      </div>
+
       <!-- all games -->
-      <div id="skyHome">
+      <div id="skyHome" hidden>
         <div class="toolbar">
           <input id="skySearchAll" type="search" placeholder="Search every Skylander… (e.g. Spyro, Legendary, trap)">
         </div>
@@ -542,10 +591,12 @@
         <label>Worth now (each, $) <input name="value" type="number" min="0" step="0.01" placeholder="check eBay sold"></label>
       </div>
       <label>Notes <input name="notes" autocomplete="off" placeholder="e.g. with card and sticker, box has a dent"></label>
+      <label>Wishlist target ($) <input name="target" type="number" min="0" step="0.01" placeholder="Only for the wishlist: the price you'd pay"></label>
       <p class="sub sky-links"><a id="skyDWiki" target="_blank" rel="noopener">Skylanders Wiki page &#8599;</a> <a id="skyDEbay" target="_blank" rel="noopener">eBay sold prices &#8599;</a></p>
       <div class="pick-actions">
         <button type="submit" id="skyDSave" class="primary">&#10003; Save to collection</button>
         <button type="button" id="skyDWish">&#9825; Add to wishlist</button>
+        <button type="button" id="skyDUnwish" class="danger" hidden>Remove from wishlist</button>
         <button type="button" id="skyDDelete" class="danger" hidden>Remove from collection</button>
       </div>
     </form>
@@ -595,8 +646,8 @@
 
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="skylanders.js?v=21"></script>
-  <script src="app.js?v=21"></script>
+  <script src="skylanders.js?v=22"></script>
+  <script src="app.js?v=22"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.

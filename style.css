@@ -536,3 +536,4 @@ body { padding-bottom: calc(84px + max(env(safe-area-inset-bottom), 12px)); }
 .sky-thumb { background: #fff; }
 .sky-dimg { background: #fff; }
 .sky-dimg-note { font-size: 11px; }
+td.thumb img.sky-tthumb { width: 46px; height: 46px; object-fit: contain; background: #fff; border-radius: 6px; }
