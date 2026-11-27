@@ -3223,7 +3223,10 @@ function renderSkyHome() {
   }
 }
 
-const skyPhoto = (id, size) => `https://storage.googleapis.com/images.pricecharting.com/${id}/${size}.jpg`;
+// Photo for an item: SkylandersCharacterList (with permission) when they have it, else PriceCharting.
+const skyPhoto = (def, big = false) => def.scl
+  ? `https://skylanderscharacterlist.com/wp-content/uploads/${big ? def.scl.replace(/-200x200(\.\w+)$/, "$1") : def.scl}`
+  : def.photo ? `https://storage.googleapis.com/images.pricecharting.com/${def.photo}/${big ? 1600 : 240}.jpg` : "";
 function skyRow(i, have, showGame = false) {
   const h = have.get(i.id);
   const state = h?.qty ? 'owned' : h?.wish ? 'wish' : 'missing';
@@ -3231,7 +3234,7 @@ function skyRow(i, have, showGame = false) {
   const v = h?.own ? itemStats(h.own) : null;
   return `<button class="sky-row ${state}" data-sky="${esc(i.id)}">
     <span class="mark">${mark}</span>
-    <span class="sky-thumb">${i.photo ? `<img src="${skyPhoto(i.photo, 240)}" alt="" loading="lazy">` : ''}</span>
+    <span class="sky-thumb">${skyPhoto(i) ? `<img src="${skyPhoto(i)}" alt="" loading="lazy">` : ''}</span>
     <span class="grow"><b>${esc(i.name)}</b><small>${esc([i.note, showGame && skyGameName(i.game), i.type, h?.own?.condition, h?.qty > 1 && `×${h.qty}`].filter(Boolean).join(' · '))}</small></span>
     <span class="price">${v?.priced ? money(v.unit) : ''}</span></button>`;
 }
@@ -3290,14 +3293,14 @@ let skyEditId = '';
 // Photo at the top of the pop-up; tap it to see it full screen.
 function showSkyPhoto(def) {
   const img = $('#skyDImg');
-  img.hidden = !def.photo;
-  if (def.photo) { img.src = skyPhoto(def.photo, 240); img.title = def.photoLike ? 'Photo of a similar version' : ''; }
+  img.hidden = !skyPhoto(def);
+  if (skyPhoto(def)) { img.src = skyPhoto(def); img.title = def.photoLike && !def.scl ? 'Photo of a similar version' : ''; }
 }
 $('#skyDImg').addEventListener('click', () => {
   const def = SKYD.byId.get(skyEditId);
-  if (!def?.photo) return;
+  if (!def || !skyPhoto(def)) return;
   const v = $('#imgView'), img = $('#imgViewImg');
-  img.onerror = null; img.hidden = false; img.src = skyPhoto(def.photo, 1600);
+  img.onerror = null; img.hidden = false; img.src = skyPhoto(def, true);
   v.showModal();
 });
 
