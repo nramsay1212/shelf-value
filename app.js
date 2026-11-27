@@ -3223,6 +3223,7 @@ function renderSkyHome() {
   }
 }
 
+const skyPhoto = (id, size) => `https://storage.googleapis.com/images.pricecharting.com/${id}/${size}.jpg`;
 function skyRow(i, have, showGame = false) {
   const h = have.get(i.id);
   const state = h?.qty ? 'owned' : h?.wish ? 'wish' : 'missing';
@@ -3230,6 +3231,7 @@ function skyRow(i, have, showGame = false) {
   const v = h?.own ? itemStats(h.own) : null;
   return `<button class="sky-row ${state}" data-sky="${esc(i.id)}">
     <span class="mark">${mark}</span>
+    <span class="sky-thumb">${i.photo ? `<img src="${skyPhoto(i.photo, 240)}" alt="" loading="lazy">` : ''}</span>
     <span class="grow"><b>${esc(i.name)}</b><small>${esc([i.note, showGame && skyGameName(i.game), i.type, h?.own?.condition, h?.qty > 1 && `×${h.qty}`].filter(Boolean).join(' · '))}</small></span>
     <span class="price">${v?.priced ? money(v.unit) : ''}</span></button>`;
 }
@@ -3285,6 +3287,20 @@ $('#skySearchAll').addEventListener('input', renderSkyHome);
 const skyDialog = $('#skyDialog'), skyForm = $('#skyForm');
 let skyEditId = '';
 // The wiki doesn't allow its pictures to be shown inside other sites, so link to the page that has it.
+// Photo at the top of the pop-up; tap it to see it full screen.
+function showSkyPhoto(def) {
+  const img = $('#skyDImg');
+  img.hidden = !def.photo;
+  if (def.photo) { img.src = skyPhoto(def.photo, 240); img.title = def.photoLike ? 'Photo of a similar version' : ''; }
+}
+$('#skyDImg').addEventListener('click', () => {
+  const def = SKYD.byId.get(skyEditId);
+  if (!def?.photo) return;
+  const v = $('#imgView'), img = $('#imgViewImg');
+  img.onerror = null; img.hidden = false; img.src = skyPhoto(def.photo, 1600);
+  v.showModal();
+});
+
 function showSkyWikiLink() {
   const def = SKYD.byId.get(skyEditId);
   if (!def) return;
@@ -3314,6 +3330,7 @@ function openSkyItem(skyId) {
   $('#skyDWish').hidden = !!own;
   $('#skyDDelete').hidden = !own;
   showSkyWikiLink();
+  showSkyPhoto(def);
   skyDialog.showModal();
   loadSkyImages([def]);
 }

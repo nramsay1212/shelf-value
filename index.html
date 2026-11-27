@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Shelf Value - Pokémon card collection tracker</title>
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="style.css?v=20">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -202,7 +202,7 @@
         </div>
         <div id="skyList" class="sky-list"></div>
       </div>
-      <p class="muted small sky-credit">Tap an item to open its picture on the <a href="https://skylanders.fandom.com" target="_blank" rel="noopener">Skylanders Wiki</a>.</p>
+      <p class="muted small sky-credit">Photos from <a href="https://www.pricecharting.com/console/skylanders" target="_blank" rel="noopener">PriceCharting</a>. Tap an item for its page on the <a href="https://skylanders.fandom.com" target="_blank" rel="noopener">Skylanders Wiki</a>.</p>
     </section>
   </div>
 
@@ -526,6 +526,7 @@
   <dialog id="skyDialog" class="pick">
     <form id="skyForm" method="dialog">
       <div class="detail-head">
+        <img id="skyDImg" class="sky-dimg" alt="" hidden>
         <div class="grow"><h2 id="skyDName"></h2><p id="skyDMeta" class="sub"></p></div>
         <button type="button" data-close class="icon" aria-label="Close">&#10005;</button>
       </div>
@@ -541,7 +542,7 @@
         <label>Worth now (each, $) <input name="value" type="number" min="0" step="0.01" placeholder="check eBay sold"></label>
       </div>
       <label>Notes <input name="notes" autocomplete="off" placeholder="e.g. with card and sticker, box has a dent"></label>
-      <p class="sub sky-links"><a id="skyDWiki" target="_blank" rel="noopener">&#128247; Picture on the Skylanders Wiki &#8599;</a> <a id="skyDEbay" target="_blank" rel="noopener">eBay sold prices &#8599;</a></p>
+      <p class="sub sky-links"><a id="skyDWiki" target="_blank" rel="noopener">Skylanders Wiki page &#8599;</a> <a id="skyDEbay" target="_blank" rel="noopener">eBay sold prices &#8599;</a></p>
       <div class="pick-actions">
         <button type="submit" id="skyDSave" class="primary">&#10003; Save to collection</button>
         <button type="button" id="skyDWish">&#9825; Add to wishlist</button>
@@ -594,8 +595,8 @@
 
 
   <div id="tooltip" class="tooltip" hidden></div>
-  <script src="skylanders.js?v=19"></script>
-  <script src="app.js?v=19"></script>
+  <script src="skylanders.js?v=20"></script>
+  <script src="app.js?v=20"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // When a new version is installed, reload once so it shows right away.

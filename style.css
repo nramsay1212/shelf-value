@@ -533,3 +533,6 @@ body { padding-bottom: calc(84px + max(env(safe-area-inset-bottom), 12px)); }
 #skyDialog .detail-head { gap: 12px; align-items: flex-start; }
 .sky-credit { margin-top: 16px; }
 .sky-links { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.sky-thumb { background: #fff; }
+.sky-dimg { background: #fff; }
+.sky-dimg-note { font-size: 11px; }
